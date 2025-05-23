@@ -6,21 +6,21 @@ import (
 	"os"
 )
 
-func Read_torrent(path string) (map[string]interface{}, error) {
+func Read_torrent(path string) (map[string]interface{}, interface{}, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read the .torrent file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read the .torrent file: %w", err)
 	}
 
-	result, err := decodeBencode(data)
+	parsed, err := decodeBencode(data)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	dict, ok := result.(map[string]interface{})
+	dict, ok := parsed.data.(map[string]interface{})
 	if !ok {
-		return nil, errors.New("torrent file invalid!!!")
+		return nil, nil, errors.New("torrent file invalid!!!")
 	}
 
-	return dict, nil
+	return dict, parsed.hash, nil
 }

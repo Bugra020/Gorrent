@@ -8,7 +8,7 @@ import (
 	"github.com/Bugra020/Gorrent/torrent"
 )
 
-func printDecodedData(data map[string]interface{}) {
+func printDecodedData(data map[string]interface{}, hash interface{}) {
 	for k, v := range data {
 		if k == "info" {
 			infoDict, ok := v.(map[string]interface{})
@@ -17,14 +17,15 @@ func printDecodedData(data map[string]interface{}) {
 				continue
 			}
 			fmt.Println("Info dictionary:")
+			fmt.Printf("	info SHA1 hash: %x\n", hash)
 			for ik, iv := range infoDict {
 				if ik == "pieces" {
 					pieces, ok := iv.(string)
 					if ok {
-						fmt.Printf("  %s: %d SHA1 hashes\n", ik, len(pieces)/20)
+						fmt.Printf("	%s: %d SHA1 hashes\n", ik, len(pieces)/20)
 					}
 				} else {
-					fmt.Printf("  %s: %v\n", ik, iv)
+					fmt.Printf("	%s: %v\n", ik, iv)
 				}
 			}
 		} else {
@@ -45,12 +46,12 @@ func main() {
 	}
 	fmt.Printf("received .torrent path: %s\n", *torrent_path)
 
-	data, err := torrent.Read_torrent(*torrent_path)
+	data, hash, err := torrent.Read_torrent(*torrent_path)
 	if err != nil {
 		fmt.Println("\nERROR:\n", err)
 		os.Exit(-1)
 	}
 
 	fmt.Println("successfully parsed the torrent metadata")
-	printDecodedData(data)
+	printDecodedData(data, hash)
 }

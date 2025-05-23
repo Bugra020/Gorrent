@@ -1,18 +1,36 @@
 package torrent
 
 import (
+	"crypto/sha1"
 	"errors"
 	"strconv"
 )
 
-type decoder struct {
-	data []byte
-	pos  int
+type parsed struct {
+	data interface{}
+	hash [20]byte
 }
 
-func decodeBencode(data []byte) (interface{}, error) {
+type decoder struct {
+	data       []byte
+	pos        int
+	info_start int
+	info_end   int
+}
+
+func decodeBencode(data []byte) (*parsed, error) {
 	dec := decoder{data: data}
-	return dec.decode()
+
+	decoded_data, err := dec.decode()
+	if err != nil {
+		return nil, err
+	}
+
+	info_hash := sha1.Sum(dec.data[dec.info_start:dec.info_end])
+
+	parsed_torrent := parsed{data: decoded_data, hash: info_hash}
+
+	return &parsed_torrent, nil
 }
 
 func (d *decoder) decode() (interface{}, error) {
@@ -103,11 +121,23 @@ func (d *decoder) decodeDict() (map[string]interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		val, err := d.decode()
-		if err != nil {
-			return nil, err
+
+		if key == "info" {
+			d.info_start = d.pos
+			val, err := d.decode()
+			if err != nil {
+				return nil, err
+			}
+			d.info_end = d.pos
+			dict[key] = val
+		} else {
+			val, err := d.decode()
+			if err != nil {
+				return nil, err
+			}
+			dict[key] = val
 		}
-		dict[key] = val
+
 	}
 	return dict, nil
 }
