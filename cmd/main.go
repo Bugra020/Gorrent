@@ -9,32 +9,6 @@ import (
 	"github.com/Bugra020/Gorrent/tracker"
 )
 
-func printDecodedData(data map[string]interface{}, hash interface{}) {
-	for k, v := range data {
-		if k == "info" {
-			infoDict, ok := v.(map[string]interface{})
-			if !ok {
-				fmt.Println("info field is not a dictionary")
-				continue
-			}
-			fmt.Println("Info dictionary:")
-			fmt.Printf("	info SHA1 hash: %x\n", hash)
-			for ik, iv := range infoDict {
-				if ik == "pieces" {
-					pieces, ok := iv.(string)
-					if ok {
-						fmt.Printf("	%s: %d SHA1 hashes\n", ik, len(pieces)/20)
-					}
-				} else {
-					fmt.Printf("	%s: %v\n", ik, iv)
-				}
-			}
-		} else {
-			fmt.Printf("%s: %v\n", k, v)
-		}
-	}
-}
-
 func main() {
 
 	torrent_path := flag.String("t", "", "path to the .torrent file")
@@ -54,7 +28,7 @@ func main() {
 	}
 
 	fmt.Println("successfully parsed the torrent metadata")
-	printDecodedData(metadata, hash)
+	torrent.PrintDecodedData(metadata, hash)
 
 	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte))
 	fmt.Println("peer list:\n", peer_list)
