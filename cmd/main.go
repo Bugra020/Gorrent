@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/Bugra020/Gorrent/peer_manager"
 	"github.com/Bugra020/Gorrent/torrent"
 	"github.com/Bugra020/Gorrent/tracker"
 )
@@ -31,6 +33,8 @@ func main() {
 	torrent.PrintDecodedData(metadata, hash)
 
 	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte))
-	fmt.Println("peer list:\n", peer_list)
+	//fmt.Println("peer list:\n", peer_list)
 
+	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
+	fmt.Printf("successfully connected to %d/%d peers", len(conns), len(peer_list))
 }
