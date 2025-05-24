@@ -2,13 +2,17 @@ package tracker
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+
+	"github.com/Bugra020/Gorrent/torrent"
 )
 
-type Tracker_request struct {
+type tracker_request struct {
 	Announce   string
 	InfoHash   [20]byte
 	PeerID     [20]byte
@@ -18,14 +22,95 @@ type Tracker_request struct {
 	Left       int64
 }
 
-func GeneratePeerID() ([20]byte, error) {
+type Peer struct {
+	Ip   string
+	Port int
+}
+
+func Get_peers(metadata map[string]interface{}, info_hash [20]byte) ([]Peer, error) {
+	peerId, _ := generatePeerID()
+	req := tracker_request{
+		Announce:   metadata["announce"].(string),
+		InfoHash:   info_hash,
+		PeerID:     peerId,
+		Port:       6881,
+		Uploaded:   0,
+		Downloaded: 0,
+		Left:       int64(metadata["info"].(map[string]interface{})["length"].(int)),
+	}
+
+	response, err := contactTracker(req)
+	if err != nil {
+		fmt.Println("\nERROR:\n", err)
+		return nil, err
+	}
+
+	decoded_response, err := torrent.DecodeBencode(response)
+	if err != nil {
+		fmt.Println("\nERROR:\n", err)
+		return nil, err
+	}
+
+	peer_list, err := parse_response(decoded_response)
+	if err != nil {
+		fmt.Println("\nERROR:\n", err)
+		return nil, err
+	}
+
+	return peer_list, nil
+}
+
+func parse_response(response *torrent.Parsed) ([]Peer, error) {
+	rootDict, ok := response.Data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid tracker response: not a dictionary")
+	}
+
+	peersRaw, ok := rootDict["peers"]
+	if !ok {
+		return nil, fmt.Errorf("tracker response missing 'peers'")
+	}
+
+	switch v := peersRaw.(type) {
+	case string:
+		return parseCompactPeers(v), nil
+	case []interface{}:
+		var peers []Peer
+		for _, item := range v {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ip := m["ip"].(string)
+			port := int(m["port"].(int))
+			peers = append(peers, Peer{Ip: ip, Port: port})
+		}
+		return peers, nil
+	default:
+		return nil, fmt.Errorf("unknown 'peers' format")
+	}
+}
+
+func parseCompactPeers(peers string) []Peer {
+	data := []byte(peers)
+	var result []Peer
+
+	for i := 0; i+6 <= len(data); i += 6 {
+		ip := net.IPv4(data[i], data[i+1], data[i+2], data[i+3]).String()
+		port := int(binary.BigEndian.Uint16(data[i+4 : i+6]))
+		result = append(result, Peer{Ip: ip, Port: port})
+	}
+	return result
+}
+
+func generatePeerID() ([20]byte, error) {
 	var peerID [20]byte
 	copy(peerID[:], []byte("-GT0010-"))
 	_, err := rand.Read(peerID[8:])
 	return peerID, err
 }
 
-func BuildURL(req Tracker_request) (string, error) {
+func buildURL(req tracker_request) (string, error) {
 	u, err := url.Parse(req.Announce)
 	if err != nil {
 		return "", err
@@ -45,8 +130,8 @@ func BuildURL(req Tracker_request) (string, error) {
 	return u.String(), nil
 }
 
-func ContactTracker(req Tracker_request) ([]byte, error) {
-	trackerURL, err := BuildURL(req)
+func contactTracker(req tracker_request) ([]byte, error) {
+	trackerURL, err := buildURL(req)
 	if err != nil {
 		return nil, err
 	}

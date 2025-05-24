@@ -17,10 +17,10 @@ func Read_torrent(path string) (map[string]interface{}, interface{}, error) {
 		return nil, nil, err
 	}
 
-	dict, ok := parsed.data.(map[string]interface{})
+	dict, ok := parsed.Data.(map[string]interface{})
 	if !ok {
 		return nil, nil, errors.New("torrent file invalid!!!")
 	}
 
-	return dict, parsed.hash, nil
+	return dict, parsed.Hash, nil
 }

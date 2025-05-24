@@ -56,21 +56,7 @@ func main() {
 	fmt.Println("successfully parsed the torrent metadata")
 	printDecodedData(metadata, hash)
 
-	peerId, _ := tracker.GeneratePeerID()
-	req := tracker.Tracker_request{
-		Announce:   metadata["announce"].(string),
-		InfoHash:   hash.([20]byte),
-		PeerID:     peerId,
-		Port:       6881,
-		Uploaded:   0,
-		Downloaded: 0,
-		Left:       int64(metadata["info"].(map[string]interface{})["length"].(int)),
-	}
+	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte))
+	fmt.Println("peer list:\n", peer_list)
 
-	tracker_response, err := tracker.ContactTracker(req)
-	if err != nil {
-		fmt.Println("error contacting tracker")
-	}
-
-	fmt.Println("tracker response: ", tracker_response)
 }

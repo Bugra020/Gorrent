@@ -6,9 +6,9 @@ import (
 	"strconv"
 )
 
-type parsed struct {
-	data interface{}
-	hash [20]byte
+type Parsed struct {
+	Data interface{}
+	Hash [20]byte
 }
 
 type decoder struct {
@@ -18,7 +18,7 @@ type decoder struct {
 	info_end   int
 }
 
-func DecodeBencode(data []byte) (*parsed, error) {
+func DecodeBencode(data []byte) (*Parsed, error) {
 	dec := decoder{data: data}
 
 	decoded_data, err := dec.decode()
@@ -28,7 +28,7 @@ func DecodeBencode(data []byte) (*parsed, error) {
 
 	info_hash := sha1.Sum(dec.data[dec.info_start:dec.info_end])
 
-	parsed_torrent := parsed{data: decoded_data, hash: info_hash}
+	parsed_torrent := Parsed{Data: decoded_data, Hash: info_hash}
 
 	return &parsed_torrent, nil
 }
