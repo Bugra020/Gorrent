@@ -12,7 +12,7 @@ func Read_torrent(path string) (map[string]interface{}, interface{}, error) {
 		return nil, nil, fmt.Errorf("failed to read the .torrent file: %w", err)
 	}
 
-	parsed, err := decodeBencode(data)
+	parsed, err := DecodeBencode(data)
 	if err != nil {
 		return nil, nil, err
 	}

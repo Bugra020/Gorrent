@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Bugra020/Gorrent/torrent"
+	"github.com/Bugra020/Gorrent/tracker"
 )
 
 func printDecodedData(data map[string]interface{}, hash interface{}) {
@@ -46,12 +47,30 @@ func main() {
 	}
 	fmt.Printf("received .torrent path: %s\n", *torrent_path)
 
-	data, hash, err := torrent.Read_torrent(*torrent_path)
+	metadata, hash, err := torrent.Read_torrent(*torrent_path)
 	if err != nil {
 		fmt.Println("\nERROR:\n", err)
 		os.Exit(-1)
 	}
 
 	fmt.Println("successfully parsed the torrent metadata")
-	printDecodedData(data, hash)
+	printDecodedData(metadata, hash)
+
+	peerId, _ := tracker.GeneratePeerID()
+	req := tracker.Tracker_request{
+		Announce:   metadata["announce"].(string),
+		InfoHash:   hash.([20]byte),
+		PeerID:     peerId,
+		Port:       6881,
+		Uploaded:   0,
+		Downloaded: 0,
+		Left:       int64(metadata["info"].(map[string]interface{})["length"].(int)),
+	}
+
+	tracker_response, err := tracker.ContactTracker(req)
+	if err != nil {
+		fmt.Println("error contacting tracker")
+	}
+
+	fmt.Println("tracker response: ", tracker_response)
 }

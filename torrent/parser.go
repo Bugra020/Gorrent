@@ -18,7 +18,7 @@ type decoder struct {
 	info_end   int
 }
 
-func decodeBencode(data []byte) (*parsed, error) {
+func DecodeBencode(data []byte) (*parsed, error) {
 	dec := decoder{data: data}
 
 	decoded_data, err := dec.decode()
