@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 )
 
@@ -14,6 +15,11 @@ type PieceWork struct {
 	Index  int
 	Length int
 	Hash   [20]byte
+}
+
+type FileWriter struct {
+	File *os.File
+	Mu   sync.Mutex
 }
 
 type PieceManager struct {
@@ -97,4 +103,18 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error
 
 	fmt.Printf("downloaded piece %d (%d bytes)\n", pw.Index, pw.Length)
 	return buf, nil
+}
+
+func (fw *FileWriter) save_piece(index int, piece_len int, data []byte) error {
+	offset := int64(index) * int64(piece_len)
+
+	fw.Mu.Lock()
+	defer fw.Mu.Unlock()
+
+	_, err := fw.File.WriteAt(data, offset)
+	if err != nil {
+		return fmt.Errorf("write failed: %w", err)
+	}
+	fmt.Printf("wrote piece %d (%d bytes) at offset %d\n", index, len(data), offset)
+	return nil
 }

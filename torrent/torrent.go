@@ -7,14 +7,15 @@ import (
 )
 
 type Torrent struct {
-	Name       string
-	Path       string
-	Info_hash  [20]byte
-	Length     int
-	Piece_len  int
-	Num_pieces int
-	Pieces     [][20]byte
-	Announce   interface{}
+	Name        string
+	Path        string
+	Info_hash   [20]byte
+	Length      int
+	Piece_len   int
+	Num_pieces  int
+	Pieces      [][20]byte
+	Announce    interface{}
+	Output_file *os.File
 }
 
 func Read_torrent(path string) (*Torrent, error) {
@@ -54,6 +55,14 @@ func Read_torrent(path string) (*Torrent, error) {
 		Pieces:     hashes,
 		Announce:   dict["announce"],
 	}
+
+	output_path := "output_files\\" + torrent_file.Name
+	output_file, err := os.Create(output_path)
+	if err != nil {
+		fmt.Printf("failed to create output file: %v", err)
+		os.Exit(-1)
+	}
+	torrent_file.Output_file = output_file
 
 	return &torrent_file, nil
 }

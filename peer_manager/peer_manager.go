@@ -111,14 +111,20 @@ func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
 					Hash:   t.Pieces[index],
 				}
 
-				_ /*data*/, err := Download_piece(conn, pw, bitfield)
+				data, err := Download_piece(conn, pw, bitfield)
 				if err != nil {
 					fmt.Printf("failed to download piece %d: %v\n", index, err)
 					return
 				}
 
 				pm.Mark_completed(index)
-				// store 'data' to disk at offset = index * pieceLength
+				fw := &FileWriter{
+					File: t.Output_file,
+				}
+				err = fw.save_piece(index, t.Piece_len, data)
+				if err != nil {
+					fmt.Printf("failed to save piece %d: %v\n", index, err)
+				}
 			}
 
 		case MsgHave:

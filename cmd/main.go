@@ -16,7 +16,6 @@ func main() {
 
 	torrent_path := flag.String("t", "", "path to the .torrent file")
 	flag.Parse()
-
 	if *torrent_path == "" {
 		fmt.Println("no file path!\nusage: ./gorrent -t=<path to .torrent file>")
 		os.Exit(-1)
@@ -29,6 +28,7 @@ func main() {
 		os.Exit(-1)
 	}
 	peer_id := generatePeerID()
+	defer torrent_file.Output_file.Close()
 
 	fmt.Println("successfully parsed the torrent metadata")
 	torrent.PrintDecodedData(torrent_file)
