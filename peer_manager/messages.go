@@ -65,6 +65,16 @@ func (m *Message) Serialize() []byte {
 	return buf
 }
 
+func parse_bitfield(payload []byte, num_pieces int) []bool {
+	bits := make([]bool, num_pieces)
+	for i := 0; i < num_pieces; i++ {
+		byteIndex := i / 8
+		bitOffset := 7 - (i % 8)
+		bits[i] = (payload[byteIndex]>>bitOffset)&1 == 1
+	}
+	return bits
+}
+
 func Send_msg(w io.Writer, m *Message) error {
 	_, err := w.Write(m.Serialize())
 	if err != nil {

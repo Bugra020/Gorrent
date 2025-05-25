@@ -26,15 +26,15 @@ type Peer struct {
 	Port int
 }
 
-func Get_peers(metadata map[string]interface{}, info_hash [20]byte, peer_id [20]byte) ([]Peer, error) {
+func Get_peers(t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
 	req := tracker_request{
-		Announce:   metadata["announce"].(string),
-		InfoHash:   info_hash,
+		Announce:   t.Announce.(string),
+		InfoHash:   t.Info_hash,
 		PeerID:     peer_id,
 		Port:       6881,
 		Uploaded:   0,
 		Downloaded: 0,
-		Left:       int64(metadata["info"].(map[string]interface{})["length"].(int)),
+		Left:       int64(t.Length),
 	}
 
 	response, err := contactTracker(req)

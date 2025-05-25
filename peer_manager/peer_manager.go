@@ -35,7 +35,7 @@ func New_handshake(info_hash [20]byte, peer_id [20]byte) []byte {
 func Do_handshakes(conns []net.Conn, hash [20]byte, peer_id [20]byte) {
 	successes := len(conns)
 	for _, conn := range conns {
-		err := do_handshake(conn, hash, peer_id)
+		err := handshake(conn, hash, peer_id)
 		if err != nil {
 			//fmt.Printf("Handshake failed with %s: %v\n", conn.RemoteAddr(), err)
 			conn.Close()
@@ -49,7 +49,7 @@ func Do_handshakes(conns []net.Conn, hash [20]byte, peer_id [20]byte) {
 	fmt.Printf("Successfully handshaked with %d/%d peers", successes, len(conns))
 }
 
-func do_handshake(conn net.Conn, infoHash [20]byte, peerID [20]byte) error {
+func handshake(conn net.Conn, infoHash [20]byte, peerID [20]byte) error {
 	msg := New_handshake(infoHash, peerID)
 	_, err := conn.Write(msg)
 	if err != nil {

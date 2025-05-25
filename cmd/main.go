@@ -23,7 +23,7 @@ func main() {
 	}
 	fmt.Printf("received .torrent path: %s\n", *torrent_path)
 
-	metadata, hash, err := torrent.Read_torrent(*torrent_path)
+	torrent_file, err := torrent.Read_torrent(*torrent_path)
 	if err != nil {
 		fmt.Println("\nERROR:\n", err)
 		os.Exit(-1)
@@ -31,12 +31,13 @@ func main() {
 	peer_id := generatePeerID()
 
 	fmt.Println("successfully parsed the torrent metadata")
-	torrent.PrintDecodedData(metadata, hash)
+	torrent.PrintDecodedData(torrent_file)
 
-	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte), peer_id)
+	peer_list, err := tracker.Get_peers(torrent_file, peer_id)
 	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
 
-	peer_manager.Do_handshakes(conns, hash.([20]byte), peer_id)
+	peer_manager.Do_handshakes(conns, torrent_file.Info_hash, peer_id)
+	//peer_manager.Send_bitfield()
 }
 
 func generatePeerID() [20]byte {
