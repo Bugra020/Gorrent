@@ -2,6 +2,7 @@ package peer_manager
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -27,6 +28,33 @@ type Message struct {
 	Payload []byte
 }
 
+func message_name(id byte) string {
+	switch id {
+	case MsgChoke:
+		return "Choke"
+	case MsgUnchoke:
+		return "Unchoke"
+	case MsgInterested:
+		return "Interested"
+	case MsgNotInterested:
+		return "NotInterested"
+	case MsgHave:
+		return "Have"
+	case MsgBitfield:
+		return "Bitfield"
+	case MsgRequest:
+		return "Request"
+	case MsgPiece:
+		return "Piece"
+	case MsgCancel:
+		return "Cancel"
+	case MsgPort:
+		return "Port"
+	default:
+		return fmt.Sprintf("unknown id %d", id)
+	}
+}
+
 func (m *Message) Serialize() []byte {
 	length := len(m.Payload) + 1
 
@@ -35,6 +63,16 @@ func (m *Message) Serialize() []byte {
 	buf[4] = m.Msg_id
 	copy(buf[5:], m.Payload)
 	return buf
+}
+
+func Send_msg(w io.Writer, m *Message) error {
+	_, err := w.Write(m.Serialize())
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("--> sent message: %s Payload length=%d\n", message_name(m.Msg_id), len(m.Payload))
+	return nil
 }
 
 func Read_msg(r io.Reader) (*Message, error) {
@@ -46,7 +84,8 @@ func Read_msg(r io.Reader) (*Message, error) {
 
 	lenght := binary.BigEndian.Uint32(lenght_buf[:])
 	if lenght == 0 {
-		return nil, nil //keep alive
+		fmt.Println("<-- received keep alive message")
+		return nil, nil
 	}
 
 	msg_buf := make([]byte, lenght)
@@ -60,5 +99,6 @@ func Read_msg(r io.Reader) (*Message, error) {
 		Payload: msg_buf[1:],
 	}
 
+	fmt.Printf("<-- received message: %s, Payload length=%d\n", message_name(msg.Msg_id), len(msg.Payload))
 	return msg, nil
 }
