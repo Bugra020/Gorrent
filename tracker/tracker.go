@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -27,12 +26,11 @@ type Peer struct {
 	Port int
 }
 
-func Get_peers(metadata map[string]interface{}, info_hash [20]byte) ([]Peer, error) {
-	peerId, _ := generatePeerID()
+func Get_peers(metadata map[string]interface{}, info_hash [20]byte, peer_id [20]byte) ([]Peer, error) {
 	req := tracker_request{
 		Announce:   metadata["announce"].(string),
 		InfoHash:   info_hash,
-		PeerID:     peerId,
+		PeerID:     peer_id,
 		Port:       6881,
 		Uploaded:   0,
 		Downloaded: 0,
@@ -101,13 +99,6 @@ func parseCompactPeers(peers string) []Peer {
 		result = append(result, Peer{Ip: ip, Port: port})
 	}
 	return result
-}
-
-func generatePeerID() ([20]byte, error) {
-	var peerID [20]byte
-	copy(peerID[:], []byte("-GT0010-"))
-	_, err := rand.Read(peerID[8:])
-	return peerID, err
 }
 
 func buildURL(req tracker_request) (string, error) {

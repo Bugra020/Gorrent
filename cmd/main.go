@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
@@ -14,7 +15,6 @@ import (
 func main() {
 
 	torrent_path := flag.String("t", "", "path to the .torrent file")
-
 	flag.Parse()
 
 	if *torrent_path == "" {
@@ -28,13 +28,23 @@ func main() {
 		fmt.Println("\nERROR:\n", err)
 		os.Exit(-1)
 	}
+	peer_id := generatePeerID()
 
 	fmt.Println("successfully parsed the torrent metadata")
 	torrent.PrintDecodedData(metadata, hash)
 
-	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte))
-	//fmt.Println("peer list:\n", peer_list)
-
+	peer_list, err := tracker.Get_peers(metadata, hash.([20]byte), peer_id)
 	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
-	fmt.Printf("successfully connected to %d/%d peers", len(conns), len(peer_list))
+
+	peer_manager.Do_handshakes(conns, hash.([20]byte), peer_id)
+}
+
+func generatePeerID() [20]byte {
+	var peerID [20]byte
+	copy(peerID[:], []byte("-GT0010-"))
+	_, err := rand.Read(peerID[8:])
+	if err != nil {
+		fmt.Println("erro generating peer id")
+	}
+	return peerID
 }
