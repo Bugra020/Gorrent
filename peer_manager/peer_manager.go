@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Bugra020/Gorrent/torrent"
 	"github.com/Bugra020/Gorrent/tracker"
 )
 
@@ -43,8 +44,9 @@ func count_true(bits []bool) int {
 	return count
 }
 
-func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPieces int) {
+func Do_handshakes(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 	var wg sync.WaitGroup
+	pm := New_piece_manager(t.Num_pieces)
 	successes := 0
 
 	for _, conn := range conns {
@@ -52,7 +54,7 @@ func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPiec
 		go func(conn net.Conn) {
 			defer wg.Done()
 
-			err := handshake(conn, infoHash, peerID)
+			err := handshake(conn, t.Info_hash, peerID)
 			if err != nil {
 				conn.Close()
 				return
@@ -60,7 +62,7 @@ func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPiec
 
 			successes++
 
-			handle_peer(conn, infoHash, peerID, numPieces)
+			handle_peer(conn, pm, t)
 		}(conn)
 	}
 
@@ -68,10 +70,11 @@ func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPiec
 	fmt.Printf("Successfully handshaked with %d/%d peers\n", successes, len(conns))
 }
 
-func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces int) {
+func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
 	defer conn.Close()
 
-	send_bitfield(conn, empty_bitfield(numPieces))
+	send_bitfield(conn, empty_bitfield(t.Num_pieces))
+	var bitfield []bool
 
 	for {
 		msg, err := Read_msg(conn)
@@ -86,14 +89,36 @@ func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces in
 
 		switch msg.Msg_id {
 		case MsgBitfield:
-			bitfield := parse_bitfield(msg.Payload, numPieces)
+			bitfield = parse_bitfield(msg.Payload, t.Num_pieces)
 			count := count_true(bitfield)
-			fmt.Printf("peer %s has %d/%d pieces\n", conn.RemoteAddr(), count, numPieces)
+			fmt.Printf("peer %s has %d/%d pieces\n", conn.RemoteAddr(), count, t.Num_pieces)
 
 			err := Send_msg(conn, &Message{Msg_id: MsgInterested})
 			if err != nil {
 				fmt.Printf("failed to send interested to %s: %v\n", conn.RemoteAddr(), err)
 				return
+			}
+
+		case MsgUnchoke:
+			if bitfield == nil {
+				continue
+			}
+			index, ok := pm.Pick_piece(bitfield)
+			if ok {
+				pw := PieceWork{
+					Index:  index,
+					Length: t.Piece_len,
+					Hash:   t.Pieces[index],
+				}
+
+				_ /*data*/, err := Download_piece(conn, pw, bitfield)
+				if err != nil {
+					fmt.Printf("failed to download piece %d: %v\n", index, err)
+					return
+				}
+
+				pm.Mark_completed(index)
+				// store 'data' to disk at offset = index * pieceLength
 			}
 
 		case MsgHave:
@@ -103,16 +128,6 @@ func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces in
 			}
 			index := binary.BigEndian.Uint32(msg.Payload)
 			fmt.Printf("peer %s having piece %d\n", conn.RemoteAddr(), index)
-
-		case MsgUnchoke:
-			fmt.Printf("peer %s unchoked us\n", conn.RemoteAddr())
-			req := new_request(0, 0, 16*1024)
-			err := Send_msg(conn, req)
-			if err != nil {
-				fmt.Printf("failed to send request to %s: %v\n", conn.RemoteAddr(), err)
-				return
-			}
-			fmt.Printf("--> sent request: piece=0 begin=0 length=16384\n")
 
 		case MsgPiece:
 			if len(msg.Payload) < 8 {

@@ -79,12 +79,15 @@ func send_bitfield(conn net.Conn, bitfield []byte) error {
 	return Send_msg(conn, msg)
 }
 
-func parse_bitfield(payload []byte, num_pieces int) []bool {
-	bits := make([]bool, num_pieces)
-	for i := 0; i < num_pieces; i++ {
+func parse_bitfield(raw []byte, numPieces int) []bool {
+	bits := make([]bool, numPieces)
+	for i := 0; i < numPieces; i++ {
 		byteIndex := i / 8
-		bitOffset := 7 - (i % 8)
-		bits[i] = (payload[byteIndex]>>bitOffset)&1 == 1
+		bitOffset := 7 - (i % 8) // bits go from high to low
+		if byteIndex >= len(raw) {
+			break
+		}
+		bits[i] = (raw[byteIndex]>>bitOffset)&1 == 1
 	}
 	return bits
 }

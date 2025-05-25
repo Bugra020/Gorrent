@@ -13,6 +13,7 @@ type Torrent struct {
 	Length     int
 	Piece_len  int
 	Num_pieces int
+	Pieces     [][20]byte
 	Announce   interface{}
 }
 
@@ -32,6 +33,17 @@ func Read_torrent(path string) (*Torrent, error) {
 		return nil, errors.New("torrent file invalid!!!")
 	}
 
+	piecesRaw := dict["info"].(map[string]interface{})["pieces"].(string)
+	pieces := []byte(piecesRaw)
+	if len(pieces)%20 != 0 {
+		return nil, errors.New("invalid pieces length")
+	}
+	numPieces := len(pieces) / 20
+	hashes := make([][20]byte, numPieces)
+	for i := 0; i < numPieces; i++ {
+		copy(hashes[i][:], pieces[i*20:(i+1)*20])
+	}
+
 	torrent_file := Torrent{
 		Name:       dict["info"].(map[string]interface{})["name"].(string),
 		Path:       path,
@@ -39,6 +51,7 @@ func Read_torrent(path string) (*Torrent, error) {
 		Length:     (dict["info"].(map[string]interface{}))["length"].(int),
 		Piece_len:  (dict["info"].(map[string]interface{}))["piece length"].(int),
 		Num_pieces: len((dict["info"].(map[string]interface{}))["pieces"].(string)) / 20,
+		Pieces:     hashes,
 		Announce:   dict["announce"],
 	}
 
