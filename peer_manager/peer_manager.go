@@ -21,7 +21,7 @@ type Handshake struct {
 const handshake_len = 68
 const protocol = "BitTorrent protocol"
 
-func New_handshake(info_hash [20]byte, peer_id [20]byte) []byte {
+func new_handshake(info_hash [20]byte, peer_id [20]byte) []byte {
 	buf := make([]byte, 0, handshake_len)
 
 	buf = append(buf, byte(len(protocol)))
@@ -71,6 +71,8 @@ func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPiec
 func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces int) {
 	defer conn.Close()
 
+	send_bitfield(conn, empty_bitfield(numPieces))
+
 	for {
 		msg, err := Read_msg(conn)
 		if err != nil {
@@ -88,7 +90,6 @@ func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces in
 			count := count_true(bitfield)
 			fmt.Printf("peer %s has %d/%d pieces\n", conn.RemoteAddr(), count, numPieces)
 
-			// For example: send interested
 			err := Send_msg(conn, &Message{Msg_id: MsgInterested})
 			if err != nil {
 				fmt.Printf("failed to send interested to %s: %v\n", conn.RemoteAddr(), err)
@@ -105,6 +106,25 @@ func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces in
 
 		case MsgUnchoke:
 			fmt.Printf("peer %s unchoked us\n", conn.RemoteAddr())
+			req := new_request(0, 0, 16*1024)
+			err := Send_msg(conn, req)
+			if err != nil {
+				fmt.Printf("failed to send request to %s: %v\n", conn.RemoteAddr(), err)
+				return
+			}
+			fmt.Printf("--> sent request: piece=0 begin=0 length=16384\n")
+
+		case MsgPiece:
+			if len(msg.Payload) < 8 {
+				fmt.Printf("invalid piece message from %s\n", conn.RemoteAddr())
+				return
+			}
+			index := binary.BigEndian.Uint32(msg.Payload[0:4])
+			begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+			block := msg.Payload[8:]
+
+			fmt.Printf("<-- received piece: index=%d begin=%d length=%d from %s\n",
+				index, begin, len(block), conn.RemoteAddr())
 
 		default:
 			fmt.Printf("peer %s sent message %s (%d bytes)\n", conn.RemoteAddr(), message_name(msg.Msg_id), len(msg.Payload))
@@ -113,7 +133,7 @@ func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces in
 }
 
 func handshake(conn net.Conn, infoHash [20]byte, peerID [20]byte) error {
-	msg := New_handshake(infoHash, peerID)
+	msg := new_handshake(infoHash, peerID)
 	_, err := conn.Write(msg)
 	if err != nil {
 		return fmt.Errorf("sending handshake failed: %v", err)

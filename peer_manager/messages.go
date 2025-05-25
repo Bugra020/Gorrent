@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 )
 
 /*
@@ -65,6 +66,19 @@ func (m *Message) Serialize() []byte {
 	return buf
 }
 
+func empty_bitfield(num_pieces int) []byte {
+	lenght := (num_pieces + 7) / 8
+	return make([]byte, lenght)
+}
+
+func send_bitfield(conn net.Conn, bitfield []byte) error {
+	msg := &Message{
+		Msg_id:  MsgBitfield,
+		Payload: bitfield,
+	}
+	return Send_msg(conn, msg)
+}
+
 func parse_bitfield(payload []byte, num_pieces int) []bool {
 	bits := make([]bool, num_pieces)
 	for i := 0; i < num_pieces; i++ {
@@ -73,6 +87,21 @@ func parse_bitfield(payload []byte, num_pieces int) []bool {
 		bits[i] = (payload[byteIndex]>>bitOffset)&1 == 1
 	}
 	return bits
+}
+
+func new_request(index int, offset int, length int) *Message {
+	//request =
+	// 4byte length + 1byte msg id(6)
+	// + 4byte piece index + 4byte offset + 4byte length
+	payload := make([]byte, 12)
+	binary.BigEndian.PutUint32(payload[0:4], uint32(index))
+	binary.BigEndian.PutUint32(payload[4:8], uint32(offset))
+	binary.BigEndian.PutUint32(payload[8:], uint32(length))
+
+	return &Message{
+		Msg_id:  MsgRequest,
+		Payload: payload,
+	}
 }
 
 func Send_msg(w io.Writer, m *Message) error {
