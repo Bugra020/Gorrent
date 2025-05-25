@@ -36,7 +36,7 @@ func main() {
 	peer_list, err := tracker.Get_peers(torrent_file, peer_id)
 	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
 
-	peer_manager.Do_handshakes(conns, torrent_file.Info_hash, peer_id)
+	peer_manager.Do_handshakes(conns, torrent_file.Info_hash, peer_id, torrent_file.Num_pieces)
 	//peer_manager.Send_bitfield()
 }
 

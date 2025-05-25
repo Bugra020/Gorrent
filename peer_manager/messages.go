@@ -94,7 +94,7 @@ func Read_msg(r io.Reader) (*Message, error) {
 
 	lenght := binary.BigEndian.Uint32(lenght_buf[:])
 	if lenght == 0 {
-		fmt.Println("<-- received keep alive message")
+		//fmt.Println("<-- received keep alive message")
 		return nil, nil
 	}
 
@@ -109,6 +109,6 @@ func Read_msg(r io.Reader) (*Message, error) {
 		Payload: msg_buf[1:],
 	}
 
-	fmt.Printf("<-- received message: %s, Payload length=%d\n", message_name(msg.Msg_id), len(msg.Payload))
+	//fmt.Printf("<-- received message: %s, Payload length=%d\n", message_name(msg.Msg_id), len(msg.Payload))
 	return msg, nil
 }

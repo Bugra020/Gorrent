@@ -2,6 +2,7 @@ package peer_manager
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -32,21 +33,83 @@ func New_handshake(info_hash [20]byte, peer_id [20]byte) []byte {
 	return buf
 }
 
-func Do_handshakes(conns []net.Conn, hash [20]byte, peer_id [20]byte) {
-	successes := len(conns)
+func count_true(bits []bool) int {
+	count := 0
+	for _, b := range bits {
+		if b {
+			count++
+		}
+	}
+	return count
+}
+
+func Do_handshakes(conns []net.Conn, infoHash [20]byte, peerID [20]byte, numPieces int) {
+	var wg sync.WaitGroup
+	successes := 0
+
 	for _, conn := range conns {
-		err := handshake(conn, hash, peer_id)
+		wg.Add(1)
+		go func(conn net.Conn) {
+			defer wg.Done()
+
+			err := handshake(conn, infoHash, peerID)
+			if err != nil {
+				conn.Close()
+				return
+			}
+
+			successes++
+
+			handle_peer(conn, infoHash, peerID, numPieces)
+		}(conn)
+	}
+
+	wg.Wait()
+	fmt.Printf("Successfully handshaked with %d/%d peers\n", successes, len(conns))
+}
+
+func handle_peer(conn net.Conn, infoHash [20]byte, peerID [20]byte, numPieces int) {
+	defer conn.Close()
+
+	for {
+		msg, err := Read_msg(conn)
 		if err != nil {
-			//fmt.Printf("Handshake failed with %s: %v\n", conn.RemoteAddr(), err)
-			conn.Close()
-			successes--
+			fmt.Printf("error reading from %s: %v\n", conn.RemoteAddr(), err)
+			return
+		}
+		if msg == nil {
+			fmt.Printf("keep-alive from %s\n", conn.RemoteAddr())
 			continue
 		}
-		//fmt.Printf("Handshake succeeded with %s\n", conn.RemoteAddr())
 
-		//can now proceed to read bitfield or exchange messages
+		switch msg.Msg_id {
+		case MsgBitfield:
+			bitfield := parse_bitfield(msg.Payload, numPieces)
+			count := count_true(bitfield)
+			fmt.Printf("peer %s has %d/%d pieces\n", conn.RemoteAddr(), count, numPieces)
+
+			// For example: send interested
+			err := Send_msg(conn, &Message{Msg_id: MsgInterested})
+			if err != nil {
+				fmt.Printf("failed to send interested to %s: %v\n", conn.RemoteAddr(), err)
+				return
+			}
+
+		case MsgHave:
+			if len(msg.Payload) < 4 {
+				fmt.Printf("invalid have message from %s\n", conn.RemoteAddr())
+				continue
+			}
+			index := binary.BigEndian.Uint32(msg.Payload)
+			fmt.Printf("peer %s having piece %d\n", conn.RemoteAddr(), index)
+
+		case MsgUnchoke:
+			fmt.Printf("peer %s unchoked us\n", conn.RemoteAddr())
+
+		default:
+			fmt.Printf("peer %s sent message %s (%d bytes)\n", conn.RemoteAddr(), message_name(msg.Msg_id), len(msg.Payload))
+		}
 	}
-	fmt.Printf("Successfully handshaked with %d/%d peers", successes, len(conns))
 }
 
 func handshake(conn net.Conn, infoHash [20]byte, peerID [20]byte) error {
