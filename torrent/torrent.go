@@ -45,6 +45,25 @@ func Read_torrent(path string) (*Torrent, error) {
 		copy(hashes[i][:], pieces[i*20:(i+1)*20])
 	}
 
+	announce := ""
+	if raw, ok := dict["announce"]; ok && raw != nil {
+		announce, _ = raw.(string)
+	}
+	if announce == "" {
+		if al, ok := dict["announce-list"]; ok {
+			if list, ok := al.([]interface{}); ok && len(list) > 0 {
+				if inner, ok := list[0].([]interface{}); ok && len(inner) > 0 {
+					if url, ok := inner[0].(string); ok {
+						announce = url
+					}
+				}
+			}
+		}
+	}
+	if announce == "" {
+		return nil, errors.New("no tracker URL found in announce or announce-list")
+	}
+
 	torrent_file := Torrent{
 		Name:       dict["info"].(map[string]interface{})["name"].(string),
 		Path:       path,
@@ -53,7 +72,7 @@ func Read_torrent(path string) (*Torrent, error) {
 		Piece_len:  (dict["info"].(map[string]interface{}))["piece length"].(int),
 		Num_pieces: len((dict["info"].(map[string]interface{}))["pieces"].(string)) / 20,
 		Pieces:     hashes,
-		Announce:   dict["announce"],
+		Announce:   announce,
 	}
 
 	output_path := "output_files\\" + torrent_file.Name

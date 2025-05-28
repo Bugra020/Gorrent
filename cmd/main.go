@@ -36,8 +36,7 @@ func main() {
 	peer_list, err := tracker.Get_peers(torrent_file, peer_id)
 	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
 
-	peer_manager.Do_handshakes(conns, torrent_file, peer_id)
-	//peer_manager.Send_bitfield()
+	peer_manager.Start_torrenting(conns, torrent_file, peer_id)
 }
 
 func generatePeerID() [20]byte {
@@ -45,7 +44,7 @@ func generatePeerID() [20]byte {
 	copy(peerID[:], []byte("-GT0010-"))
 	_, err := rand.Read(peerID[8:])
 	if err != nil {
-		fmt.Println("erro generating peer id")
+		fmt.Println("error generating peer id")
 	}
 	return peerID
 }

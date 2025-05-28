@@ -44,10 +44,25 @@ func count_true(bits []bool) int {
 	return count
 }
 
-func Do_handshakes(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
+func Start_torrenting(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 	var wg sync.WaitGroup
 	pm := New_piece_manager(t.Num_pieces)
 	successes := 0
+
+	go func() {
+		for {
+			time.Sleep(3 * time.Second)
+			pm.mu.Lock()
+			count := 0
+			for _, have := range pm.Have {
+				if have {
+					count++
+				}
+			}
+			pm.mu.Unlock()
+			fmt.Printf("Progress: %d / %d pieces downloaded\n", count, pm.NumPieces)
+		}
+	}()
 
 	for _, conn := range conns {
 		wg.Add(1)
@@ -100,32 +115,10 @@ func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
 			}
 
 		case MsgUnchoke:
-			if bitfield == nil {
-				continue
+			fw := &FileWriter{
+				File: t.Output_file,
 			}
-			index, ok := pm.Pick_piece(bitfield)
-			if ok {
-				pw := PieceWork{
-					Index:  index,
-					Length: t.Piece_len,
-					Hash:   t.Pieces[index],
-				}
-
-				data, err := Download_piece(conn, pw, bitfield)
-				if err != nil {
-					fmt.Printf("failed to download piece %d: %v\n", index, err)
-					return
-				}
-
-				pm.Mark_completed(index)
-				fw := &FileWriter{
-					File: t.Output_file,
-				}
-				err = fw.save_piece(index, t.Piece_len, data)
-				if err != nil {
-					fmt.Printf("failed to save piece %d: %v\n", index, err)
-				}
-			}
+			go StartDownloader(conn, bitfield, pm, fw, build_piece_works(t.Pieces, t.Piece_len, t.Length))
 
 		case MsgHave:
 			if len(msg.Payload) < 4 {

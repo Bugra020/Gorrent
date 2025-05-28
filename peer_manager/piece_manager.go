@@ -57,6 +57,61 @@ func (pm *PieceManager) Mark_completed(index int) {
 	pm.Requested[index] = false
 }
 
+func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
+	works := make([]PieceWork, len(pieces))
+	for i := 0; i < len(pieces); i++ {
+		length := pieceLen
+		if i == len(pieces)-1 {
+			length = totalLen - (pieceLen * (len(pieces) - 1))
+		}
+		works[i] = PieceWork{
+			Index:  i,
+			Length: length,
+			Hash:   pieces[i],
+		}
+	}
+	return works
+}
+
+func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileWriter, pieces []PieceWork) {
+	for {
+		if bitfield == nil {
+			continue
+		}
+		index, ok := pm.Pick_piece(bitfield)
+		if !ok {
+			return
+		}
+
+		pw := pieces[index]
+
+		data, err := Download_piece(conn, pw, bitfield)
+		if err != nil {
+			fmt.Printf("failed to download piece %d: %v\n", index, err)
+
+			pm.mu.Lock()
+			pm.Requested[index] = false
+			pm.mu.Unlock()
+
+			continue
+		}
+
+		err = fw.save_piece(pw.Index, pw.Length, data)
+		if err != nil {
+			fmt.Printf("failed to save piece %d: %v\n", pw.Index, err)
+
+			pm.mu.Lock()
+			pm.Have[index] = false
+			pm.Requested[index] = false
+			pm.mu.Unlock()
+
+			continue
+		}
+
+		pm.Mark_completed(index)
+	}
+}
+
 func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error) {
 	if pw.Index >= len(bitfield) || !bitfield[pw.Index] {
 		return nil, fmt.Errorf("peer doesn't have piece %d", pw.Index)
@@ -83,16 +138,21 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error
 			return nil, fmt.Errorf("read failed: %w", err)
 		}
 
+		if msg == nil {
+			return nil, fmt.Errorf("msg is nil: %w", err)
+		}
+
 		if msg.Msg_id == MsgPiece && len(msg.Payload) < 8 {
 			return nil, fmt.Errorf("short piece message")
 		}
 
-		// parse index/begin/block
-		index := binary.BigEndian.Uint32(msg.Payload[0:4])
-		beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
-		copy(buf[beginResp:], msg.Payload[8:])
+		if msg.Msg_id == MsgPiece {
+			index := binary.BigEndian.Uint32(msg.Payload[0:4])
+			beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
+			copy(buf[beginResp:], msg.Payload[8:])
 
-		fmt.Printf("<-- received block: piece %d, begin %d, len %d\n", index, beginResp, len(msg.Payload[8:]))
+			fmt.Printf("<-- received block: piece %d, begin %d, len %d\n", index, beginResp, len(msg.Payload[8:]))
+		}
 	}
 
 	// hash check
