@@ -28,7 +28,6 @@ func main() {
 		os.Exit(-1)
 	}
 	peer_id := generatePeerID()
-	defer torrent_file.Output_file.Close()
 
 	fmt.Println("successfully parsed the torrent metadata")
 	torrent.PrintDecodedData(torrent_file)

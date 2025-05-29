@@ -49,7 +49,6 @@ func Start_torrenting(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 	pm := New_piece_manager(t.Num_pieces, t.Length, t.Piece_len)
 	successes := 0
 
-	// Progress reporting goroutine - now shows block progress
 	go func() {
 		for {
 			time.Sleep(3 * time.Second)
@@ -110,9 +109,7 @@ func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
 			}
 
 		case MsgUnchoke:
-			fw := &FileWriter{
-				File: t.Output_file,
-			}
+			fw := NewFileWriter(t)
 			go StartDownloader(conn, bitfield, pm, fw, build_piece_works(t.Pieces, t.Piece_len, t.Length))
 
 		case MsgHave:

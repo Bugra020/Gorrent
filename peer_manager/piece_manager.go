@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/Bugra020/Gorrent/torrent"
 )
 
 const block_size = 16 * 1024 //16kb
@@ -20,8 +23,9 @@ type PieceWork struct {
 }
 
 type FileWriter struct {
-	File *os.File
-	Mu   sync.Mutex
+	Torrent   *torrent.Torrent
+	OpenFiles map[string]*os.File
+	Mu        sync.Mutex
 }
 
 type PieceManager struct {
@@ -31,6 +35,43 @@ type PieceManager struct {
 	TotalBlocks      int
 	DownloadedBlocks int
 	mu               sync.Mutex
+}
+
+func NewFileWriter(t *torrent.Torrent) *FileWriter {
+	return &FileWriter{
+		Torrent:   t,
+		OpenFiles: make(map[string]*os.File),
+	}
+}
+
+func (fw *FileWriter) getOrCreateFile(filePath string) (*os.File, error) {
+	if file, exists := fw.OpenFiles[filePath]; exists {
+		return file, nil
+	}
+
+	dir := filepath.Dir(filePath)
+	err := os.MkdirAll(dir, 0755)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create directory %s: %v", dir, err)
+	}
+
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file %s: %v", filePath, err)
+	}
+
+	fw.OpenFiles[filePath] = file
+	return file, nil
+}
+
+func (fw *FileWriter) Close() {
+	fw.Mu.Lock()
+	defer fw.Mu.Unlock()
+
+	for _, file := range fw.OpenFiles {
+		file.Close()
+	}
+	fw.OpenFiles = make(map[string]*os.File)
 }
 
 func New_piece_manager(numPieces int, totalLength int, pieceLength int) *PieceManager {
@@ -104,6 +145,8 @@ func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
 }
 
 func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileWriter, pieces []PieceWork) {
+	defer fw.Close() // Ensure files are closed when downloader finishes
+
 	for {
 		if bitfield == nil {
 			continue
@@ -193,14 +236,12 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManag
 			beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
 			copy(buf[beginResp:], msg.Payload[8:])
 
-			// Increment downloaded blocks counter
 			pm.IncrementDownloadedBlocks()
 
 			fmt.Printf("<-- received block: piece %d, begin %d, len %d\n", index, beginResp, len(msg.Payload[8:]))
 		}
 	}
 
-	// hash check
 	hash := sha1.Sum(buf)
 	if !bytes.Equal(hash[:], pw.Hash[:]) {
 		return nil, fmt.Errorf("piece hash mismatch: piece %d", pw.Index)
@@ -210,16 +251,82 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManag
 	return buf, nil
 }
 
-func (fw *FileWriter) save_piece(index int, piece_len int, data []byte) error {
-	offset := int64(index) * int64(piece_len)
-
+func (fw *FileWriter) save_piece(pieceIndex int, pieceLength int, data []byte) error {
 	fw.Mu.Lock()
 	defer fw.Mu.Unlock()
 
-	_, err := fw.File.WriteAt(data, offset)
-	if err != nil {
-		return fmt.Errorf("write failed: %w", err)
+	if !fw.Torrent.IsMultiFile {
+		outputPath := filepath.Join(fw.Torrent.OutputDir, fw.Torrent.Name)
+		file, err := fw.getOrCreateFile(outputPath)
+		if err != nil {
+			return err
+		}
+
+		offset := int64(pieceIndex) * int64(fw.Torrent.Piece_len)
+		_, err = file.WriteAt(data, offset)
+		if err != nil {
+			return fmt.Errorf("write failed: %w", err)
+		}
+		fmt.Printf("wrote piece %d (%d bytes) at offset %d to %s\n",
+			pieceIndex, len(data), offset, fw.Torrent.Name)
+		return nil
 	}
-	fmt.Printf("wrote piece %d (%d bytes) at offset %d\n", index, len(data), offset)
+
+	pieceOffset := int64(pieceIndex) * int64(fw.Torrent.Piece_len)
+	dataOffset := 0
+	currentFileOffset := int64(0)
+
+	for _, fileInfo := range fw.Torrent.Files {
+		fileEnd := currentFileOffset + int64(fileInfo.Length)
+
+		if pieceOffset < fileEnd && int64(pieceOffset)+int64(len(data)) > currentFileOffset {
+			writeStart := max(pieceOffset, currentFileOffset)
+			writeEnd := min(int64(pieceOffset)+int64(len(data)), fileEnd)
+
+			if writeStart < writeEnd {
+				fileWriteOffset := writeStart - currentFileOffset
+				dataReadOffset := writeStart - pieceOffset
+				writeLength := writeEnd - writeStart
+
+				filePath := filepath.Join(fw.Torrent.OutputDir, filepath.Join(fileInfo.Path...))
+				file, err := fw.getOrCreateFile(filePath)
+				if err != nil {
+					return err
+				}
+
+				writeData := data[dataReadOffset : dataReadOffset+writeLength]
+				_, err = file.WriteAt(writeData, fileWriteOffset)
+				if err != nil {
+					return fmt.Errorf("write to %s failed: %w", filePath, err)
+				}
+
+				fmt.Printf("wrote %d bytes to %s at offset %d (piece %d)\n",
+					len(writeData), filepath.Join(fileInfo.Path...), fileWriteOffset, pieceIndex)
+
+				dataOffset += int(writeLength)
+			}
+		}
+
+		currentFileOffset = fileEnd
+
+		if dataOffset >= len(data) {
+			break
+		}
+	}
+
 	return nil
+}
+
+func max(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }

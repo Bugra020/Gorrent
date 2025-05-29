@@ -109,7 +109,7 @@ func AnnounceToTracker(conn *net.UDPConn, addr *net.UDPAddr, connID uint64, info
 	for i := 20; i+6 <= n; i += 6 {
 		ip := net.IPv4(resp[i], resp[i+1], resp[i+2], resp[i+3])
 		port := binary.BigEndian.Uint16(resp[i+4 : i+6])
-		peers = append(peers, Peer{Ip: string(ip), Port: int(port)})
+		peers = append(peers, Peer{Ip: ip.String(), Port: int(port)})
 	}
 
 	return peers, nil
