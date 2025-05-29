@@ -1,75 +1,19 @@
 package tracker
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/url"
 
 	"github.com/Bugra020/Gorrent/torrent"
 )
 
-type tracker_request struct {
-	Announce   string
-	InfoHash   [20]byte
-	PeerID     [20]byte
-	Port       int
-	Uploaded   int64
-	Downloaded int64
-	Left       int64
-}
-
-type Peer struct {
-	Ip   string
-	Port int
-}
-
-func Get_peers(t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
-	trackerURLs, ok := t.Announce.([]string)
-	if !ok {
-		return nil, fmt.Errorf("invalid Announce format")
-	}
-
-	for _, trackerURL := range trackerURLs {
-		u, err := url.Parse(trackerURL)
-		if err != nil {
-			fmt.Printf("invalid tracker URL: %v\n", err)
-			continue
-		}
-
-		switch u.Scheme {
-		case "http", "https":
-			peers, err := getHTTPPeers(trackerURL, t, peer_id)
-			if err == nil {
-				return peers, nil
-			}
-			fmt.Printf("HTTP tracker failed: %v\n", err)
-
-		case "udp":
-			connID, addr, conn, err := ConnectToTracker(trackerURL)
-			if err != nil {
-				fmt.Printf("failed UDP connect: %v\n", err)
-				continue
-			}
-			defer conn.Close()
-
-			peers, err := AnnounceToTracker(conn, addr, connID, t.Info_hash, peer_id, int64(t.Length), 6881)
-			if err != nil {
-				fmt.Printf("failed UDP announce: %v\n", err)
-				continue
-			}
-			return peers, nil
-
-		default:
-			fmt.Printf("unsupported tracker scheme: %s\n", u.Scheme)
-		}
-	}
-
-	return nil, fmt.Errorf("no valid tracker responded")
-}
-
-/*
 func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
 	req := tracker_request{
-		Announce:   t.Announce.(string),
+		Announce:   trackerURL,
 		InfoHash:   t.Info_hash,
 		PeerID:     peer_id,
 		Port:       6881,
@@ -176,4 +120,3 @@ func contactTracker(req tracker_request) ([]byte, error) {
 
 	return io.ReadAll(resp.Body)
 }
-*/

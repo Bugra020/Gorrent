@@ -31,10 +31,11 @@ func Read_torrent(path string) (*Torrent, error) {
 
 	dict, ok := parsed.Data.(map[string]interface{})
 	if !ok {
-		return nil, errors.New("torrent file invalid!!!")
+		return nil, errors.New("torrent file invalid")
 	}
 
-	piecesRaw := dict["info"].(map[string]interface{})["pieces"].(string)
+	infoDict := dict["info"].(map[string]interface{})
+	piecesRaw := infoDict["pieces"].(string)
 	pieces := []byte(piecesRaw)
 	if len(pieces)%20 != 0 {
 		return nil, errors.New("invalid pieces length")
@@ -45,34 +46,37 @@ func Read_torrent(path string) (*Torrent, error) {
 		copy(hashes[i][:], pieces[i*20:(i+1)*20])
 	}
 
-	announce := ""
-	if raw, ok := dict["announce"]; ok && raw != nil {
-		announce, _ = raw.(string)
+	// Collect all tracker URLs
+	var trackers []string
+	if ann, ok := dict["announce"].(string); ok && ann != "" {
+		trackers = append(trackers, ann)
 	}
-	if announce == "" {
-		if al, ok := dict["announce-list"]; ok {
-			if list, ok := al.([]interface{}); ok && len(list) > 0 {
-				if inner, ok := list[0].([]interface{}); ok && len(inner) > 0 {
-					if url, ok := inner[0].(string); ok {
-						announce = url
+
+	if al, ok := dict["announce-list"].([]interface{}); ok {
+		for _, tier := range al {
+			if tierList, ok := tier.([]interface{}); ok {
+				for _, url := range tierList {
+					if s, ok := url.(string); ok {
+						trackers = append(trackers, s)
 					}
 				}
 			}
 		}
 	}
-	if announce == "" {
+
+	if len(trackers) == 0 {
 		return nil, errors.New("no tracker URL found in announce or announce-list")
 	}
 
 	torrent_file := Torrent{
-		Name:       dict["info"].(map[string]interface{})["name"].(string),
+		Name:       infoDict["name"].(string),
 		Path:       path,
 		Info_hash:  parsed.Hash,
-		Length:     (dict["info"].(map[string]interface{}))["length"].(int),
-		Piece_len:  (dict["info"].(map[string]interface{}))["piece length"].(int),
-		Num_pieces: len((dict["info"].(map[string]interface{}))["pieces"].(string)) / 20,
+		Length:     infoDict["length"].(int),
+		Piece_len:  infoDict["piece length"].(int),
+		Num_pieces: numPieces,
 		Pieces:     hashes,
-		Announce:   announce,
+		Announce:   trackers, // now []string
 	}
 
 	output_path := "output_files\\" + torrent_file.Name
