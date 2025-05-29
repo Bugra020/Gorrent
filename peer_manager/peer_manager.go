@@ -47,15 +47,23 @@ func count_true(bits []bool) int {
 func Start_torrenting(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 	var wg sync.WaitGroup
 	pm := New_piece_manager(t.Num_pieces, t.Length, t.Piece_len)
-	successes := 0
+	successfulHandshakes := 0
 
+	// Progress reporting goroutine
 	go func() {
-		for {
-			time.Sleep(3 * time.Second)
-			downloaded, total := pm.GetProgress()
-			percentage := float64(downloaded) / float64(total) * 100
-			fmt.Printf("Progress: %d / %d blocks downloaded (%.2f%%)\n", downloaded, total, percentage)
+		for !pm.IsComplete() {
+			downloadedBlocks, totalBlocks, completedPieces, totalPieces := pm.GetProgress()
+
+			blockPercentage := float64(downloadedBlocks) / float64(totalBlocks) * 100
+			piecePercentage := float64(completedPieces) / float64(totalPieces) * 100
+
+			fmt.Printf("Progress: %d/%d pieces (%.1f%%) | %d/%d blocks (%.1f%%)\n",
+				completedPieces, totalPieces, piecePercentage,
+				downloadedBlocks, totalBlocks, blockPercentage)
+
+			time.Sleep(5 * time.Second)
 		}
+		fmt.Println("Download completed!")
 	}()
 
 	for _, conn := range conns {
@@ -65,18 +73,21 @@ func Start_torrenting(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 
 			err := handshake(conn, t.Info_hash, peerID)
 			if err != nil {
+				fmt.Printf("Handshake failed with %s: %v\n", conn.RemoteAddr(), err)
 				conn.Close()
 				return
 			}
 
-			successes++
+			successfulHandshakes++
+			fmt.Printf("Handshake successful with %s\n", conn.RemoteAddr())
 
 			handle_peer(conn, pm, t)
 		}(conn)
 	}
 
 	wg.Wait()
-	fmt.Printf("Successfully handshaked with %d/%d peers\n", successes, len(conns))
+	fmt.Printf("Finished with %d successful handshakes out of %d connections\n",
+		successfulHandshakes, len(conns))
 }
 
 func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
@@ -131,7 +142,6 @@ func handle_peer(conn net.Conn, pm *PieceManager, t *torrent.Torrent) {
 
 			fmt.Printf("<-- received piece: index=%d begin=%d length=%d from %s\n",
 				index, begin, len(block), conn.RemoteAddr())
-
 		default:
 			fmt.Printf("peer %s sent message %s (%d bytes)\n", conn.RemoteAddr(), message_name(msg.Msg_id), len(msg.Payload))
 		}

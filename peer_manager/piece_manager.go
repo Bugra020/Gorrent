@@ -8,8 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/Bugra020/Gorrent/torrent"
 )
@@ -34,6 +34,7 @@ type PieceManager struct {
 	NumPieces        int
 	TotalBlocks      int
 	DownloadedBlocks int
+	CompletedPieces  int
 	mu               sync.Mutex
 }
 
@@ -93,6 +94,7 @@ func New_piece_manager(numPieces int, totalLength int, pieceLength int) *PieceMa
 		NumPieces:        numPieces,
 		TotalBlocks:      totalBlocks,
 		DownloadedBlocks: 0,
+		CompletedPieces:  0,
 	}
 }
 
@@ -100,8 +102,9 @@ func (pm *PieceManager) Pick_piece(peerBitfield []bool) (int, bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
+	// Simple sequential strategy - can be improved to rarest-first later
 	for i := 0; i < pm.NumPieces; i++ {
-		if !pm.Have[i] && !pm.Requested[i] && peerBitfield[i] {
+		if !pm.Have[i] && !pm.Requested[i] && i < len(peerBitfield) && peerBitfield[i] {
 			pm.Requested[i] = true
 			return i, true
 		}
@@ -112,7 +115,17 @@ func (pm *PieceManager) Pick_piece(peerBitfield []bool) (int, bool) {
 func (pm *PieceManager) Mark_completed(index int) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.Have[index] = true
+
+	if !pm.Have[index] {
+		pm.Have[index] = true
+		pm.CompletedPieces++
+	}
+	pm.Requested[index] = false
+}
+
+func (pm *PieceManager) Mark_failed(index int) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	pm.Requested[index] = false
 }
 
@@ -122,10 +135,16 @@ func (pm *PieceManager) IncrementDownloadedBlocks() {
 	pm.DownloadedBlocks++
 }
 
-func (pm *PieceManager) GetProgress() (int, int) {
+func (pm *PieceManager) GetProgress() (int, int, int, int) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	return pm.DownloadedBlocks, pm.TotalBlocks
+	return pm.DownloadedBlocks, pm.TotalBlocks, pm.CompletedPieces, pm.NumPieces
+}
+
+func (pm *PieceManager) IsComplete() bool {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.CompletedPieces == pm.NumPieces
 }
 
 func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
@@ -145,48 +164,69 @@ func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
 }
 
 func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileWriter, pieces []PieceWork) {
-	defer fw.Close() // Ensure files are closed when downloader finishes
+	defer fw.Close()
 
-	for {
+	maxRetries := 3
+
+	for !pm.IsComplete() {
 		if bitfield == nil {
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+
 		index, ok := pm.Pick_piece(bitfield)
 		if !ok {
+			// No more pieces available from this peer
+			fmt.Printf("No more pieces available from %s\n", conn.RemoteAddr())
 			return
 		}
 
 		pw := pieces[index]
 
-		data, err := Download_piece(conn, pw, bitfield, pm)
-		if err != nil {
+		var data []byte
+		var err error
+
+		// Retry failed downloads
+		for retry := 0; retry < maxRetries; retry++ {
+			data, err = Download_piece(conn, pw, bitfield, pm)
+			if err == nil {
+				break
+			}
+
 			if err.Error() == "closedconnerr" {
+				fmt.Printf("Connection closed by %s\n", conn.RemoteAddr())
 				return
 			}
 
-			fmt.Printf("failed to download piece %d: %v\n", index, err)
+			fmt.Printf("Failed to download piece %d from %s (attempt %d/%d): %v\n",
+				index, conn.RemoteAddr(), retry+1, maxRetries, err)
 
-			pm.mu.Lock()
-			pm.Requested[index] = false
-			pm.mu.Unlock()
+			if retry == maxRetries-1 {
+				pm.Mark_failed(index)
+				break
+			}
 
+			// Wait before retry
+			time.Sleep(time.Duration(retry+1) * time.Second)
+		}
+
+		if err != nil {
 			continue
 		}
 
+		// Save the piece
 		err = fw.save_piece(pw.Index, pw.Length, data)
 		if err != nil {
-			fmt.Printf("failed to save piece %d: %v\n", pw.Index, err)
-
-			pm.mu.Lock()
-			pm.Have[index] = false
-			pm.Requested[index] = false
-			pm.mu.Unlock()
-
+			fmt.Printf("Failed to save piece %d: %v\n", pw.Index, err)
+			pm.Mark_failed(index)
 			continue
 		}
 
 		pm.Mark_completed(index)
+		fmt.Printf("✓ Completed piece %d from %s\n", pw.Index, conn.RemoteAddr())
 	}
+
+	fmt.Printf("Download completed by %s\n", conn.RemoteAddr())
 }
 
 func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManager) ([]byte, error) {
@@ -196,9 +236,11 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManag
 
 	buf := make([]byte, pw.Length)
 	blocks := (pw.Length + block_size - 1) / block_size
+	receivedBlocks := make([]bool, blocks)
+	completedBlocks := 0
 
+	// Request all blocks first
 	for b := 0; b < blocks; b++ {
-
 		begin := b * block_size
 		reqLen := block_size
 		if begin+block_size > pw.Length {
@@ -208,46 +250,72 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManag
 		req := new_request(pw.Index, begin, reqLen)
 		err := Send_msg(conn, req)
 		if err != nil {
-			err_msg := err.Error()
-			if strings.Contains(err_msg, "use of closed network connection") ||
-				strings.Contains(err_msg, "EOF") ||
-				strings.Contains(err_msg, "connection reset by peer") {
-
-				return nil, fmt.Errorf("closedconnerr")
-			}
-			return nil, fmt.Errorf("send failed: %w", err)
+			return nil, fmt.Errorf("send request failed: %w", err)
 		}
+	}
 
+	// Receive blocks until we have them all
+	for completedBlocks < blocks {
 		msg, err := Read_msg(conn)
 		if err != nil {
 			return nil, fmt.Errorf("read failed: %w", err)
 		}
 
 		if msg == nil {
-			return nil, fmt.Errorf("msg is nil: %w", err)
+			continue // keep-alive message
 		}
 
-		if msg.Msg_id == MsgPiece && len(msg.Payload) < 8 {
+		if msg.Msg_id != MsgPiece {
+			continue // ignore non-piece messages
+		}
+
+		if len(msg.Payload) < 8 {
 			return nil, fmt.Errorf("short piece message")
 		}
 
-		if msg.Msg_id == MsgPiece {
-			index := binary.BigEndian.Uint32(msg.Payload[0:4])
-			beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
-			copy(buf[beginResp:], msg.Payload[8:])
+		// Validate the received block
+		index := binary.BigEndian.Uint32(msg.Payload[0:4])
+		beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
+		blockData := msg.Payload[8:]
 
-			pm.IncrementDownloadedBlocks()
-
-			fmt.Printf("<-- received block: piece %d, begin %d, len %d\n", index, beginResp, len(msg.Payload[8:]))
+		if int(index) != pw.Index {
+			continue // not for our piece
 		}
+
+		blockIndex := int(beginResp) / block_size
+		if blockIndex >= blocks || receivedBlocks[blockIndex] {
+			continue // invalid block or already received
+		}
+
+		// Validate block size
+		expectedLen := block_size
+		if blockIndex == blocks-1 && pw.Length%block_size != 0 {
+			expectedLen = pw.Length % block_size
+		}
+
+		if len(blockData) != expectedLen {
+			fmt.Printf("unexpected block size: got %d, expected %d\n", len(blockData), expectedLen)
+			continue
+		}
+
+		// Copy block data to buffer
+		copy(buf[beginResp:], blockData)
+		receivedBlocks[blockIndex] = true
+		completedBlocks++
+
+		pm.IncrementDownloadedBlocks()
+
+		fmt.Printf("<-- received block %d/%d for piece %d (begin=%d, len=%d)\n",
+			completedBlocks, blocks, index, beginResp, len(blockData))
 	}
 
+	// Verify piece hash
 	hash := sha1.Sum(buf)
 	if !bytes.Equal(hash[:], pw.Hash[:]) {
 		return nil, fmt.Errorf("piece hash mismatch: piece %d", pw.Index)
 	}
 
-	fmt.Printf("downloaded piece %d (%d bytes)\n", pw.Index, pw.Length)
+	fmt.Printf("✓ downloaded and verified piece %d (%d bytes)\n", pw.Index, pw.Length)
 	return buf, nil
 }
 
