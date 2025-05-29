@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 )
 
 const block_size = 16 * 1024 //16kb
+
 type PieceWork struct {
 	Index  int
 	Length int
@@ -23,17 +25,33 @@ type FileWriter struct {
 }
 
 type PieceManager struct {
-	Have      []bool
-	Requested []bool
-	NumPieces int
-	mu        sync.Mutex
+	Have             []bool
+	Requested        []bool
+	NumPieces        int
+	TotalBlocks      int
+	DownloadedBlocks int
+	mu               sync.Mutex
 }
 
-func New_piece_manager(numPieces int) *PieceManager {
+func New_piece_manager(numPieces int, totalLength int, pieceLength int) *PieceManager {
+	// Calculate total number of blocks across all pieces
+	totalBlocks := 0
+	for i := 0; i < numPieces; i++ {
+		pieceLen := pieceLength
+		if i == numPieces-1 {
+			// Last piece might be smaller
+			pieceLen = totalLength - (pieceLength * (numPieces - 1))
+		}
+		blocksInPiece := (pieceLen + block_size - 1) / block_size
+		totalBlocks += blocksInPiece
+	}
+
 	return &PieceManager{
-		Have:      make([]bool, numPieces),
-		Requested: make([]bool, numPieces),
-		NumPieces: numPieces,
+		Have:             make([]bool, numPieces),
+		Requested:        make([]bool, numPieces),
+		NumPieces:        numPieces,
+		TotalBlocks:      totalBlocks,
+		DownloadedBlocks: 0,
 	}
 }
 
@@ -55,6 +73,18 @@ func (pm *PieceManager) Mark_completed(index int) {
 	defer pm.mu.Unlock()
 	pm.Have[index] = true
 	pm.Requested[index] = false
+}
+
+func (pm *PieceManager) IncrementDownloadedBlocks() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.DownloadedBlocks++
+}
+
+func (pm *PieceManager) GetProgress() (int, int) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.DownloadedBlocks, pm.TotalBlocks
 }
 
 func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
@@ -85,8 +115,12 @@ func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileW
 
 		pw := pieces[index]
 
-		data, err := Download_piece(conn, pw, bitfield)
+		data, err := Download_piece(conn, pw, bitfield, pm)
 		if err != nil {
+			if err.Error() == "closedconnerr" {
+				return
+			}
+
 			fmt.Printf("failed to download piece %d: %v\n", index, err)
 
 			pm.mu.Lock()
@@ -112,7 +146,7 @@ func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileW
 	}
 }
 
-func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error) {
+func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManager) ([]byte, error) {
 	if pw.Index >= len(bitfield) || !bitfield[pw.Index] {
 		return nil, fmt.Errorf("peer doesn't have piece %d", pw.Index)
 	}
@@ -121,6 +155,7 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error
 	blocks := (pw.Length + block_size - 1) / block_size
 
 	for b := 0; b < blocks; b++ {
+
 		begin := b * block_size
 		reqLen := block_size
 		if begin+block_size > pw.Length {
@@ -130,6 +165,13 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error
 		req := new_request(pw.Index, begin, reqLen)
 		err := Send_msg(conn, req)
 		if err != nil {
+			err_msg := err.Error()
+			if strings.Contains(err_msg, "use of closed network connection") ||
+				strings.Contains(err_msg, "EOF") ||
+				strings.Contains(err_msg, "connection reset by peer") {
+
+				return nil, fmt.Errorf("closedconnerr")
+			}
 			return nil, fmt.Errorf("send failed: %w", err)
 		}
 
@@ -150,6 +192,9 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool) ([]byte, error
 			index := binary.BigEndian.Uint32(msg.Payload[0:4])
 			beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
 			copy(buf[beginResp:], msg.Payload[8:])
+
+			// Increment downloaded blocks counter
+			pm.IncrementDownloadedBlocks()
 
 			fmt.Printf("<-- received block: piece %d, begin %d, len %d\n", index, beginResp, len(msg.Payload[8:]))
 		}

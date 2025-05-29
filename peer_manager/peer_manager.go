@@ -46,21 +46,16 @@ func count_true(bits []bool) int {
 
 func Start_torrenting(conns []net.Conn, t *torrent.Torrent, peerID [20]byte) {
 	var wg sync.WaitGroup
-	pm := New_piece_manager(t.Num_pieces)
+	pm := New_piece_manager(t.Num_pieces, t.Length, t.Piece_len)
 	successes := 0
 
+	// Progress reporting goroutine - now shows block progress
 	go func() {
 		for {
 			time.Sleep(3 * time.Second)
-			pm.mu.Lock()
-			count := 0
-			for _, have := range pm.Have {
-				if have {
-					count++
-				}
-			}
-			pm.mu.Unlock()
-			fmt.Printf("Progress: %d / %d pieces downloaded\n", count, pm.NumPieces)
+			downloaded, total := pm.GetProgress()
+			percentage := float64(downloaded) / float64(total) * 100
+			fmt.Printf("Progress: %d / %d blocks downloaded (%.2f%%)\n", downloaded, total, percentage)
 		}
 	}()
 
