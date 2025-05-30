@@ -2,8 +2,10 @@ package peer_manager
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -163,12 +165,28 @@ func build_piece_works(pieces [][20]byte, pieceLen, totalLen int) []PieceWork {
 	return works
 }
 
-func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileWriter, pieces []PieceWork) {
+// Add this improved StartDownloader function to replace the existing one in piece_manager.go
+
+func StartDownloader(ctx context.Context, conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileWriter, pieces []PieceWork) {
 	defer fw.Close()
 
+	fmt.Printf("Starting downloader for %s\n", conn.RemoteAddr())
 	maxRetries := 3
+	backoffTime := time.Second
 
-	for !pm.IsComplete() {
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("Downloader context cancelled for %s\n", conn.RemoteAddr())
+			return
+		default:
+		}
+
+		if pm.IsComplete() {
+			fmt.Printf("Download completed by %s\n", conn.RemoteAddr())
+			return
+		}
+
 		if bitfield == nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -176,25 +194,40 @@ func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileW
 
 		index, ok := pm.Pick_piece(bitfield)
 		if !ok {
-			// No more pieces available from this peer
-			fmt.Printf("No more pieces available from %s\n", conn.RemoteAddr())
-			return
+			// No more pieces available from this peer, wait a bit and retry
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+				continue
+			}
 		}
 
 		pw := pieces[index]
-
 		var data []byte
 		var err error
 
-		// Retry failed downloads
+		// Retry failed downloads with exponential backoff
 		for retry := 0; retry < maxRetries; retry++ {
-			data, err = Download_piece(conn, pw, bitfield, pm)
+			select {
+			case <-ctx.Done():
+				pm.Mark_failed(index)
+				return
+			default:
+			}
+
+			// Set timeouts for download attempt
+			downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			data, err = Download_piece_with_context(downloadCtx, conn, pw, bitfield, pm)
+			cancel()
+
 			if err == nil {
 				break
 			}
 
-			if err.Error() == "closedconnerr" {
-				fmt.Printf("Connection closed by %s\n", conn.RemoteAddr())
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				fmt.Printf("Download cancelled or timed out for piece %d from %s\n", index, conn.RemoteAddr())
+				pm.Mark_failed(index)
 				return
 			}
 
@@ -206,8 +239,14 @@ func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileW
 				break
 			}
 
-			// Wait before retry
-			time.Sleep(time.Duration(retry+1) * time.Second)
+			// Exponential backoff
+			waitTime := backoffTime * time.Duration(1<<retry)
+			select {
+			case <-ctx.Done():
+				pm.Mark_failed(index)
+				return
+			case <-time.After(waitTime):
+			}
 		}
 
 		if err != nil {
@@ -225,8 +264,114 @@ func StartDownloader(conn net.Conn, bitfield []bool, pm *PieceManager, fw *FileW
 		pm.Mark_completed(index)
 		fmt.Printf("✓ Completed piece %d from %s\n", pw.Index, conn.RemoteAddr())
 	}
+}
 
-	fmt.Printf("Download completed by %s\n", conn.RemoteAddr())
+func Download_piece_with_context(ctx context.Context, conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManager) ([]byte, error) {
+	if pw.Index >= len(bitfield) || !bitfield[pw.Index] {
+		return nil, fmt.Errorf("peer doesn't have piece %d", pw.Index)
+	}
+
+	buf := make([]byte, pw.Length)
+	blocks := (pw.Length + block_size - 1) / block_size
+	receivedBlocks := make([]bool, blocks)
+	completedBlocks := 0
+
+	// Request all blocks first
+	for b := 0; b < blocks; b++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		begin := b * block_size
+		reqLen := block_size
+		if begin+block_size > pw.Length {
+			reqLen = pw.Length - begin
+		}
+
+		req := new_request(pw.Index, begin, reqLen)
+
+		// Set write timeout
+		conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		err := Send_msg(conn, req)
+		if err != nil {
+			return nil, fmt.Errorf("send request failed: %w", err)
+		}
+	}
+
+	// Receive blocks until we have them all
+	for completedBlocks < blocks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Set read timeout for each message
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		msg, err := Read_msg(conn)
+		if err != nil {
+			return nil, fmt.Errorf("read failed: %w", err)
+		}
+
+		if msg == nil {
+			continue // keep-alive message
+		}
+
+		if msg.Msg_id != MsgPiece {
+			continue // ignore non-piece messages
+		}
+
+		if len(msg.Payload) < 8 {
+			return nil, fmt.Errorf("short piece message")
+		}
+
+		// Validate the received block
+		index := binary.BigEndian.Uint32(msg.Payload[0:4])
+		beginResp := binary.BigEndian.Uint32(msg.Payload[4:8])
+		blockData := msg.Payload[8:]
+
+		if int(index) != pw.Index {
+			continue // not for our piece
+		}
+
+		blockIndex := int(beginResp) / block_size
+		if blockIndex >= blocks || receivedBlocks[blockIndex] {
+			continue // invalid block or already received
+		}
+
+		// Validate block size
+		expectedLen := block_size
+		if blockIndex == blocks-1 && pw.Length%block_size != 0 {
+			expectedLen = pw.Length % block_size
+		}
+
+		if len(blockData) != expectedLen {
+			fmt.Printf("Unexpected block size: got %d, expected %d\n", len(blockData), expectedLen)
+			continue
+		}
+
+		// Copy block data to buffer
+		copy(buf[beginResp:], blockData)
+		receivedBlocks[blockIndex] = true
+		completedBlocks++
+
+		pm.IncrementDownloadedBlocks()
+
+		fmt.Printf("Received block %d/%d for piece %d (begin=%d, len=%d) from %s\n",
+			completedBlocks, blocks, index, beginResp, len(blockData), conn.RemoteAddr())
+	}
+
+	// Verify piece hash
+	hash := sha1.Sum(buf)
+	if !bytes.Equal(hash[:], pw.Hash[:]) {
+		return nil, fmt.Errorf("piece hash mismatch: piece %d", pw.Index)
+	}
+
+	fmt.Printf("✓ Downloaded and verified piece %d (%d bytes) from %s\n",
+		pw.Index, pw.Length, conn.RemoteAddr())
+	return buf, nil
 }
 
 func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManager) ([]byte, error) {
@@ -239,7 +384,6 @@ func Download_piece(conn net.Conn, pw PieceWork, bitfield []bool, pm *PieceManag
 	receivedBlocks := make([]bool, blocks)
 	completedBlocks := 0
 
-	// Request all blocks first
 	for b := 0; b < blocks; b++ {
 		begin := b * block_size
 		reqLen := block_size
