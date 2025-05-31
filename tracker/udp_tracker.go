@@ -68,7 +68,7 @@ func ConnectToTracker(trackerURL string) (uint64, *net.UDPAddr, *net.UDPConn, er
 	return connectionID, addr, conn, nil
 }
 
-func AnnounceToTracker(conn *net.UDPConn, addr *net.UDPAddr, connID uint64, infoHash, peerID [20]byte, left int64, port uint16) ([]Peer, error) {
+func AnnounceToTracker(conn *net.UDPConn, addr *net.UDPAddr, connID uint64, infoHash, peerID [20]byte, left int64, port uint16) ([]PeerData, error) {
 	transactionID, _ := generateTransactionID()
 	buf := new(bytes.Buffer)
 
@@ -105,11 +105,11 @@ func AnnounceToTracker(conn *net.UDPConn, addr *net.UDPAddr, connID uint64, info
 		return nil, errors.New("invalid announce response")
 	}
 
-	var peers []Peer
+	var peers []PeerData
 	for i := 20; i+6 <= n; i += 6 {
 		ip := net.IPv4(resp[i], resp[i+1], resp[i+2], resp[i+3])
 		port := binary.BigEndian.Uint16(resp[i+4 : i+6])
-		peers = append(peers, Peer{Ip: ip.String(), Port: int(port)})
+		peers = append(peers, PeerData{Ip: ip.String(), Port: int(port)})
 	}
 
 	return peers, nil

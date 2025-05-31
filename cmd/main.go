@@ -5,9 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/Bugra020/Gorrent/peer_manager"
+	"github.com/Bugra020/Gorrent/download_manager"
 	"github.com/Bugra020/Gorrent/torrent"
 	"github.com/Bugra020/Gorrent/tracker"
 )
@@ -28,14 +27,13 @@ func main() {
 		os.Exit(-1)
 	}
 	peer_id := generatePeerID()
+	torrent_file.PeerId = peer_id
 
 	fmt.Println("successfully parsed the torrent metadata")
 	torrent.PrintDecodedData(torrent_file)
 
-	peer_list, err := tracker.Get_peers(torrent_file, peer_id)
-	conns := peer_manager.Connect_to_peers(peer_list, 5*time.Second, 100)
-
-	peer_manager.Start_torrenting(conns, torrent_file, peer_id)
+	peer_list, err := tracker.Get_peers(torrent_file)
+	download_manager.Start_download(peer_list, torrent_file)
 }
 
 func generatePeerID() [20]byte {

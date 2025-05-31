@@ -11,7 +11,7 @@ import (
 	"github.com/Bugra020/Gorrent/torrent"
 )
 
-func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
+func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]PeerData, error) {
 	req := tracker_request{
 		Announce:   trackerURL,
 		InfoHash:   t.Info_hash,
@@ -43,7 +43,7 @@ func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]Pe
 	return peer_list, nil
 }
 
-func parse_response(response *torrent.Parsed) ([]Peer, error) {
+func parse_response(response *torrent.Parsed) ([]PeerData, error) {
 	rootDict, ok := response.Data.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid tracker response: not a dictionary")
@@ -58,7 +58,7 @@ func parse_response(response *torrent.Parsed) ([]Peer, error) {
 	case string:
 		return parseCompactPeers(v), nil
 	case []interface{}:
-		var peers []Peer
+		var peers []PeerData
 		for _, item := range v {
 			m, ok := item.(map[string]interface{})
 			if !ok {
@@ -66,7 +66,7 @@ func parse_response(response *torrent.Parsed) ([]Peer, error) {
 			}
 			ip := m["ip"].(string)
 			port := int(m["port"].(int))
-			peers = append(peers, Peer{Ip: ip, Port: port})
+			peers = append(peers, PeerData{Ip: ip, Port: port})
 		}
 		return peers, nil
 	default:
@@ -74,14 +74,14 @@ func parse_response(response *torrent.Parsed) ([]Peer, error) {
 	}
 }
 
-func parseCompactPeers(peers string) []Peer {
+func parseCompactPeers(peers string) []PeerData {
 	data := []byte(peers)
-	var result []Peer
+	var result []PeerData
 
 	for i := 0; i+6 <= len(data); i += 6 {
 		ip := net.IPv4(data[i], data[i+1], data[i+2], data[i+3]).String()
 		port := int(binary.BigEndian.Uint16(data[i+4 : i+6]))
-		result = append(result, Peer{Ip: ip, Port: port})
+		result = append(result, PeerData{Ip: ip, Port: port})
 	}
 	return result
 }

@@ -1,4 +1,4 @@
-package peer_manager
+package download_manager
 
 import (
 	"encoding/binary"
@@ -83,7 +83,7 @@ func parse_bitfield(raw []byte, numPieces int) []bool {
 	bits := make([]bool, numPieces)
 	for i := 0; i < numPieces; i++ {
 		byteIndex := i / 8
-		bitOffset := 7 - (i % 8) // bits go from high to low
+		bitOffset := 7 - (i % 8)
 		if byteIndex >= len(raw) {
 			break
 		}
@@ -126,7 +126,6 @@ func Read_msg(r io.Reader) (*Message, error) {
 
 	lenght := binary.BigEndian.Uint32(lenght_buf[:])
 	if lenght == 0 {
-		//fmt.Println("<-- received keep alive message")
 		return nil, nil
 	}
 
@@ -141,6 +140,5 @@ func Read_msg(r io.Reader) (*Message, error) {
 		Payload: msg_buf[1:],
 	}
 
-	//fmt.Printf("<-- received message: %s, Payload length=%d\n", message_name(msg.Msg_id), len(msg.Payload))
 	return msg, nil
 }

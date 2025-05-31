@@ -17,12 +17,12 @@ type tracker_request struct {
 	Left       int64
 }
 
-type Peer struct {
+type PeerData struct {
 	Ip   string
 	Port int
 }
 
-func Get_peers(t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
+func Get_peers(t *torrent.Torrent) ([]PeerData, error) {
 	trackerURLs, ok := t.Announce.([]string)
 	if !ok {
 		return nil, fmt.Errorf("invalid Announce format")
@@ -37,7 +37,7 @@ func Get_peers(t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
 
 		switch u.Scheme {
 		case "http", "https":
-			peers, err := getHTTPPeers(trackerURL, t, peer_id)
+			peers, err := getHTTPPeers(trackerURL, t, t.PeerId)
 			if err == nil {
 				return peers, nil
 			}
@@ -51,7 +51,7 @@ func Get_peers(t *torrent.Torrent, peer_id [20]byte) ([]Peer, error) {
 			}
 			defer conn.Close()
 
-			peers, err := AnnounceToTracker(conn, addr, connID, t.Info_hash, peer_id, int64(t.Length), 6881)
+			peers, err := AnnounceToTracker(conn, addr, connID, t.Info_hash, t.PeerId, int64(t.Length), 6881)
 			if err != nil {
 				fmt.Printf("failed UDP announce: %v\n", err)
 				continue

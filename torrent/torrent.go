@@ -13,6 +13,7 @@ type FileInfo struct {
 }
 
 type Torrent struct {
+	PeerId      [20]byte
 	Name        string
 	Path        string
 	Info_hash   [20]byte
