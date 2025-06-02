@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Bugra020/Gorrent/utils"
 )
 
 type FileInfo struct {
@@ -126,18 +128,18 @@ func Read_torrent(path string) (*Torrent, error) {
 }
 
 func PrintDecodedData(t *Torrent) {
-	fmt.Printf("name: %s\n", t.Name)
-	fmt.Printf("path: %s\n", t.Path)
-	fmt.Printf("info_hash: %x\n", t.Info_hash)
-	fmt.Printf("length: %d\n", t.Length)
-	fmt.Printf("piece_len: %d\n", t.Piece_len)
-	fmt.Printf("num_pieces: %d\n", t.Num_pieces)
-	fmt.Printf("announce: %v\n", t.Announce)
-	fmt.Printf("multi-file: %t\n", t.IsMultiFile)
+	utils.Debuglog("name: %s\n", t.Name)
+	utils.Debuglog("path: %s\n", t.Path)
+	utils.Debuglog("info_hash: %x\n", t.Info_hash)
+	utils.Debuglog("length: %d\n", t.Length)
+	utils.Debuglog("piece_len: %d\n", t.Piece_len)
+	utils.Debuglog("num_pieces: %d\n", t.Num_pieces)
+	utils.Debuglog("announce: %v\n", t.Announce)
+	utils.Debuglog("multi-file: %t\n", t.IsMultiFile)
 	if t.IsMultiFile {
-		fmt.Printf("files (%d):\n", len(t.Files))
+		utils.Debuglog("files (%d):\n", len(t.Files))
 		for i, file := range t.Files {
-			fmt.Printf("  %d: %s (%d bytes)\n", i, filepath.Join(file.Path...), file.Length)
+			utils.Debuglog("  %d: %s (%d bytes)\n", i, filepath.Join(file.Path...), file.Length)
 		}
 	}
 }

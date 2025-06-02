@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/Bugra020/Gorrent/utils"
 )
 
 /*
@@ -113,7 +115,7 @@ func Send_msg(w io.Writer, m *Message) error {
 		return err
 	}
 
-	fmt.Printf("--> sent message: %s Payload length=%d\n", message_name(m.Msg_id), len(m.Payload))
+	utils.Debuglog("--> sent message: %s Payload length=%d\n", message_name(m.Msg_id), len(m.Payload))
 	return nil
 }
 

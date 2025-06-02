@@ -5,6 +5,7 @@ import (
 	"net/url"
 
 	"github.com/Bugra020/Gorrent/torrent"
+	"github.com/Bugra020/Gorrent/utils"
 )
 
 type tracker_request struct {
@@ -31,7 +32,7 @@ func Get_peers(t *torrent.Torrent) ([]PeerData, error) {
 	for _, trackerURL := range trackerURLs {
 		u, err := url.Parse(trackerURL)
 		if err != nil {
-			fmt.Printf("invalid tracker URL: %v\n", err)
+			utils.Debuglog("invalid tracker URL: %v\n", err)
 			continue
 		}
 
@@ -41,25 +42,25 @@ func Get_peers(t *torrent.Torrent) ([]PeerData, error) {
 			if err == nil {
 				return peers, nil
 			}
-			fmt.Printf("HTTP tracker failed: %v\n", err)
+			utils.Debuglog("HTTP tracker failed: %v\n", err)
 
 		case "udp":
 			connID, addr, conn, err := ConnectToTracker(trackerURL)
 			if err != nil {
-				fmt.Printf("failed UDP connect: %v\n", err)
+				utils.Debuglog("failed UDP connect: %v\n", err)
 				continue
 			}
 			defer conn.Close()
 
 			peers, err := AnnounceToTracker(conn, addr, connID, t.Info_hash, t.PeerId, int64(t.Length), 6881)
 			if err != nil {
-				fmt.Printf("failed UDP announce: %v\n", err)
+				utils.Debuglog("failed UDP announce: %v\n", err)
 				continue
 			}
 			return peers, nil
 
 		default:
-			fmt.Printf("unsupported tracker scheme: %s\n", u.Scheme)
+			utils.Debuglog("unsupported tracker scheme: %s\n", u.Scheme)
 		}
 	}
 

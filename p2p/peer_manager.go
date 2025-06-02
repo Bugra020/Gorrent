@@ -15,6 +15,7 @@ import (
 
 	"github.com/Bugra020/Gorrent/torrent"
 	"github.com/Bugra020/Gorrent/tracker"
+	"github.com/Bugra020/Gorrent/utils"
 )
 
 type Client struct {
@@ -78,17 +79,17 @@ func (pp *PeerPool) List() []*Peer {
 func HandlePeer(peer *Peer, t *torrent.Torrent) {
 	conn, err := connectToPeer(peer)
 	if err != nil {
-		fmt.Printf("connection failed to %s:%d -> %v\n", peer.Ip, peer.Port, err)
+		utils.Debuglog("connection failed to %s:%d -> %v\n", peer.Ip, peer.Port, err)
 		return
 	}
 	if conn == nil {
-		fmt.Printf("connection returned nil for %s:%d\n", peer.Ip, peer.Port)
+		utils.Debuglog("connection returned nil for %s:%d\n", peer.Ip, peer.Port)
 		return
 	}
 	peer.Conn = conn
 
 	if err := Handshake(peer, t.Info_hash, client.Id); err != nil {
-		fmt.Printf("handshake failed with %s:%d -> %v\n", peer.Ip, peer.Port, err)
+		utils.Debuglog("handshake failed with %s:%d -> %v\n", peer.Ip, peer.Port, err)
 		conn.Close()
 		return
 	}
@@ -151,9 +152,9 @@ func requestPieceFromPeer(p *Peer, t *torrent.Torrent) {
 	for {
 		select {
 		case <-p.UnchokeSignal:
-			fmt.Printf("requestPiecesFromPeer for %s received unchoke signal.\n", p.Ip)
+			utils.Debuglog("requestPiecesFromPeer for %s received unchoke signal.\n", p.Ip)
 		case <-p.ChokeSignal:
-			fmt.Printf("requestPiecesFromPeer for %s received choke signal. Pausing requests.\n", p.Ip)
+			utils.Debuglog("requestPiecesFromPeer for %s received choke signal. Pausing requests.\n", p.Ip)
 			continue
 		case <-time.After(5 * time.Second):
 			if p.Choked {
@@ -190,18 +191,18 @@ func requestPieceFromPeer(p *Peer, t *torrent.Torrent) {
 			}
 
 			if p.Choked {
-				fmt.Printf("peer %s choked us while requesting piece %d. Pausing requests.\n", p.Ip, pieceToRequest.index)
+				utils.Debuglog("peer %s choked us while requesting piece %d. Pausing requests.\n", p.Ip, pieceToRequest.index)
 				break
 			}
 
 			err := Send_msg(p.Conn, new_request(pieceToRequest.index, offset, blockLength))
 			if err != nil {
-				fmt.Printf("failed to send request for piece %d, offset %d to %s:%d -> %v\n", pieceToRequest.index, offset, p.Ip, p.Port, err)
+				utils.Debuglog("failed to send request for piece %d, offset %d to %s:%d -> %v\n", pieceToRequest.index, offset, p.Ip, p.Port, err)
 				delete(pieceToRequest.receivedBlocks, offset)
 				break
 			}
 			pieceToRequest.receivedBlocks[offset] = true
-			fmt.Printf("requested piece %d, offset %d, length %d from %s\n", pieceToRequest.index, offset, blockLength, p.Ip)
+			utils.Debuglog("requested piece %d, offset %d, length %d from %s\n", pieceToRequest.index, offset, blockLength, p.Ip)
 
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -225,7 +226,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 		switch msg.Msg_id {
 		case MsgUnchoke: //
 			p.Choked = false
-			fmt.Printf("peer %s unchoked us\n", p.Ip)
+			utils.Debuglog("peer %s unchoked us\n", p.Ip)
 			select {
 			case p.UnchokeSignal <- struct{}{}:
 			default:
@@ -233,7 +234,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 
 		case MsgBitfield:
 			p.Bitfield = parse_bitfield(msg.Payload, t.Num_pieces) //
-			fmt.Printf("received bitfield from %s\n", p.Ip)
+			utils.Debuglog("received bitfield from %s\n", p.Ip)
 
 			if !sentInterested && peerHasInterestingPieces(p.Bitfield, t) {
 				sendInterested(p.Conn)
@@ -241,7 +242,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 			}
 		case MsgChoke:
 			p.Choked = true
-			fmt.Printf("peer %s choked us\n", p.Ip)
+			utils.Debuglog("peer %s choked us\n", p.Ip)
 			select {
 			case p.ChokeSignal <- struct{}{}:
 			default:
@@ -251,7 +252,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 				pieceIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
 				if int(pieceIndex) >= 0 && int(pieceIndex) < len(p.Bitfield) {
 					p.Bitfield[pieceIndex] = true
-					fmt.Printf("peer %s has piece %d\n", p.Ip, pieceIndex)
+					utils.Debuglog("peer %s has piece %d\n", p.Ip, pieceIndex)
 					if !sentInterested && peerHasInterestingPieces(p.Bitfield, t) {
 						sendInterested(p.Conn)
 						sentInterested = true
@@ -263,10 +264,10 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 				reqPieceIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
 				reqOffset := binary.BigEndian.Uint32(msg.Payload[4:8])
 				reqLength := binary.BigEndian.Uint32(msg.Payload[8:12])
-				fmt.Printf("received request from %s for piece %d, offset %d, length %d\n", p.Ip, reqPieceIndex, reqOffset, reqLength)
+				utils.Debuglog("received request from %s for piece %d, offset %d, length %d\n", p.Ip, reqPieceIndex, reqOffset, reqLength)
 				// TODO: Implement serving requested pieces if you become a seeder
 			} else {
-				fmt.Printf("received malformed request message from %s\n", p.Ip)
+				utils.Debuglog("received malformed request message from %s\n", p.Ip)
 			}
 		case MsgPiece:
 			if len(msg.Payload) >= 8 {
@@ -274,10 +275,10 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 				begin := int(binary.BigEndian.Uint32(msg.Payload[4:8]))
 				block := msg.Payload[8:]
 
-				fmt.Printf("received piece data from %s: piece %d, begin %d, length %d\n", p.Ip, pieceIndex, begin, len(block))
+				utils.Debuglog("received piece data from %s: piece %d, begin %d, length %d\n", p.Ip, pieceIndex, begin, len(block))
 
 				if pieceIndex < 0 || pieceIndex >= len(Pieces) {
-					fmt.Printf("received piece data for invalid piece index %d from %s\n", pieceIndex, p.Ip)
+					utils.Debuglog("received piece data for invalid piece index %d from %s\n", pieceIndex, p.Ip)
 					continue
 				}
 
@@ -298,7 +299,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 				if allBlocksReceived {
 					hash := sha1.Sum(pw.data)
 					if bytes.Equal(hash[:], pw.hash[:]) {
-						fmt.Printf("Piece %d downloaded and verified successfully!\n", pieceIndex)
+						utils.Debuglog("Piece %d downloaded and verified successfully!\n", pieceIndex)
 						piecesMu.Lock()
 						pw.status = Downloaded
 						set_bit(client.Bitfield, pieceIndex)
@@ -306,7 +307,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 
 						err := writePieceToFile(pw, t)
 						if err != nil {
-							fmt.Printf("Error writing piece %d to file: %v\n", pieceIndex, err)
+							utils.Debuglog("Error writing piece %d to file: %v\n", pieceIndex, err)
 							// Optionally, reset status to NotDownloaded and clear data if writing fails
 							piecesMu.Lock()
 							pw.status = NotDownloaded
@@ -320,7 +321,7 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 						}
 
 					} else {
-						fmt.Printf("Piece %d hash mismatch! Resetting for re-download.\n", pieceIndex)
+						utils.Debuglog("Piece %d hash mismatch! Resetting for re-download.\n", pieceIndex)
 						piecesMu.Lock()
 						pw.status = NotDownloaded
 						pw.receivedBlocks = make(map[int]bool)
@@ -328,10 +329,10 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 					}
 				}
 			} else {
-				fmt.Printf("received malformed piece message from %s\n", p.Ip)
+				utils.Debuglog("received malformed piece message from %s\n", p.Ip)
 			}
 		default:
-			fmt.Printf("received message %s from %s\n", message_name(msg.Msg_id), p.Ip)
+			utils.Debuglog("received message %s from %s\n", message_name(msg.Msg_id), p.Ip)
 		}
 	}
 }
@@ -343,9 +344,9 @@ func readFromPeer(p *Peer, t *torrent.Torrent) {
 		msg, err := Read_msg(p.Conn)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Printf("peer %s:%d disconnected gracefully.\n", p.Ip, p.Port)
+				utils.Debuglog("peer %s:%d disconnected gracefully.\n", p.Ip, p.Port)
 			} else {
-				fmt.Printf("couldn't read from %s:%d -> %v\n", p.Ip, p.Port, err)
+				utils.Debuglog("couldn't read from %s:%d -> %v\n", p.Ip, p.Port, err)
 			}
 			return
 		}
@@ -359,7 +360,7 @@ func connectToPeer(peer *Peer) (net.Conn, error) {
 	addr := net.JoinHostPort(peer.Ip.String(), strconv.Itoa(int(peer.Port)))
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
-		fmt.Printf("failed to connect %s, %v\n", addr, err)
+		utils.Debuglog("failed to connect %s, %v\n", addr, err)
 		return nil, err
 	}
 
@@ -380,7 +381,7 @@ func Handshake(peer *Peer, infoHash, peerID [20]byte) error {
 	if recvInfoHash != infoHash {
 		return fmt.Errorf("infoHash mismatch")
 	}
-	fmt.Printf("handshaked with %s\n", peer.Ip)
+	utils.Debuglog("handshaked with %s\n", peer.Ip)
 
 	return nil
 }
@@ -531,7 +532,7 @@ func writePieceToFile(pw *PieceWork, t *torrent.Torrent) error {
 		if err != nil {
 			return fmt.Errorf("failed to write piece %d at offset %d to single file: %w", pw.index, offset, err)
 		}
-		fmt.Printf("Successfully wrote piece %d to single file.\n", pw.index)
+		utils.Debuglog("Successfully wrote piece %d to single file.\n", pw.index)
 		return nil
 	}
 
@@ -582,6 +583,6 @@ func writePieceToFile(pw *PieceWork, t *torrent.Torrent) error {
 		}
 		currentTorrentOffset += file.Length
 	}
-	fmt.Printf("Successfully wrote piece %d to file(s).\n", pw.index)
+	utils.Debuglog("Successfully wrote piece %d to file(s).\n", pw.index)
 	return nil
 }

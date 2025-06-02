@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/Bugra020/Gorrent/torrent"
+	"github.com/Bugra020/Gorrent/utils"
 )
 
 func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]PeerData, error) {
@@ -24,19 +25,19 @@ func getHTTPPeers(trackerURL string, t *torrent.Torrent, peer_id [20]byte) ([]Pe
 
 	response, err := contactTracker(req)
 	if err != nil {
-		fmt.Println("\nERROR:\n", err)
+		utils.Debuglog("\nERROR:\n", err)
 		return nil, err
 	}
 
 	decoded_response, err := torrent.DecodeBencode(response)
 	if err != nil {
-		fmt.Println("\nERROR:\n", err)
+		utils.Debuglog("\nERROR:\n", err)
 		return nil, err
 	}
 
 	peer_list, err := parse_response(decoded_response)
 	if err != nil {
-		fmt.Println("\nERROR:\n", err)
+		utils.Debuglog("\nERROR:\n", err)
 		return nil, err
 	}
 
@@ -114,7 +115,7 @@ func contactTracker(req tracker_request) ([]byte, error) {
 		return nil, err
 	}
 
-	fmt.Printf("Contacting tracker: %s\n", trackerURL)
+	utils.Debuglog("Contacting tracker: %s\n", trackerURL)
 
 	resp, err := http.Get(trackerURL)
 	if err != nil {
