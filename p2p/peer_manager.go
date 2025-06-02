@@ -305,6 +305,8 @@ func respondToPeer(p *Peer, t *torrent.Torrent) {
 						set_bit(client.Bitfield, pieceIndex)
 						piecesMu.Unlock()
 
+						go updateAndDisplayProgress(t)
+
 						err := writePieceToFile(pw, t)
 						if err != nil {
 							utils.Debuglog("Error writing piece %d to file: %v\n", pieceIndex, err)
@@ -439,6 +441,8 @@ func readHandshake(conn net.Conn) (infoHash [20]byte, peerID [20]byte, err error
 	return
 }
 
+var globalProgressTracker *utils.ProgressTracker
+
 func Start_download(peers []tracker.PeerData, t *torrent.Torrent) {
 	Pieces = make([]PieceWork, t.Num_pieces)
 	for i := 0; i < t.Num_pieces; i++ {
@@ -460,6 +464,12 @@ func Start_download(peers []tracker.PeerData, t *torrent.Torrent) {
 		}
 	}
 
+	globalProgressTracker = utils.NewProgressTracker(t.Num_pieces, int64(t.Length))
+
+	// Start progress display in background
+	go displayProgressLoop(t)
+
+	// Initialize peer pool and client (existing code)
 	pp := NewPeerPool()
 	client.Bitfield = empty_bitfield(t.Num_pieces)
 	client.Id = t.PeerId
@@ -485,6 +495,72 @@ func Start_download(peers []tracker.PeerData, t *torrent.Torrent) {
 		}(peer_list[i])
 	}
 	wg.Wait()
+}
+
+func displayProgressLoop(t *torrent.Torrent) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			updateAndDisplayProgress(t)
+			if isDownloadComplete(t) {
+				return
+			}
+		}
+	}
+}
+
+func updateAndDisplayProgress(t *torrent.Torrent) {
+	if globalProgressTracker == nil {
+		return
+	}
+
+	piecesMu.Lock()
+	downloaded := 0
+	inProgress := 0
+	var downloadedBytes int64
+
+	for i := 0; i < t.Num_pieces; i++ {
+		switch Pieces[i].status {
+		case Downloaded:
+			downloaded++
+			downloadedBytes += int64(Pieces[i].length)
+		case InProgress:
+			inProgress++
+
+			Pieces[i].mu.Lock()
+			for offset := 0; offset < Pieces[i].length; offset += BlockSize {
+				if Pieces[i].receivedBlocks[offset] {
+					blockSize := BlockSize
+					if offset+blockSize > Pieces[i].length {
+						blockSize = Pieces[i].length - offset
+					}
+					downloadedBytes += int64(blockSize)
+				}
+			}
+			Pieces[i].mu.Unlock()
+		}
+	}
+	piecesMu.Unlock()
+
+	globalProgressTracker.UpdateProgress(downloaded, inProgress, downloadedBytes)
+	_, status := globalProgressTracker.GetProgress()
+
+	fmt.Printf("\r\033[K%s", status)
+}
+
+func isDownloadComplete(t *torrent.Torrent) bool {
+	piecesMu.Lock()
+	defer piecesMu.Unlock()
+
+	for i := 0; i < t.Num_pieces; i++ {
+		if Pieces[i].status != Downloaded {
+			return false
+		}
+	}
+	return true
 }
 
 func set_bit(bitfield []byte, index int) {
