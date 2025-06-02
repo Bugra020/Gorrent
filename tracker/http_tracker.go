@@ -93,8 +93,10 @@ func buildURL(req tracker_request) (string, error) {
 	}
 
 	params := url.Values{}
+
 	params.Set("info_hash", string(req.InfoHash[:]))
 	params.Set("peer_id", string(req.PeerID[:]))
+
 	params.Set("port", fmt.Sprintf("%d", req.Port))
 	params.Set("uploaded", fmt.Sprintf("%d", req.Uploaded))
 	params.Set("downloaded", fmt.Sprintf("%d", req.Downloaded))
@@ -112,11 +114,18 @@ func contactTracker(req tracker_request) ([]byte, error) {
 		return nil, err
 	}
 
+	fmt.Printf("Contacting tracker: %s\n", trackerURL)
+
 	resp, err := http.Get(trackerURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("tracker returned non-200 status code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
 
 	return io.ReadAll(resp.Body)
 }

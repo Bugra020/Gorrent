@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Bugra020/Gorrent/download_manager"
+	"github.com/Bugra020/Gorrent/p2p"
 	"github.com/Bugra020/Gorrent/torrent"
 	"github.com/Bugra020/Gorrent/tracker"
 )
@@ -33,7 +33,7 @@ func main() {
 	torrent.PrintDecodedData(torrent_file)
 
 	peer_list, err := tracker.Get_peers(torrent_file)
-	download_manager.Start_download(peer_list, torrent_file)
+	p2p.Start_download(peer_list, torrent_file)
 }
 
 func generatePeerID() [20]byte {

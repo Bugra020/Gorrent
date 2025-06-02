@@ -26,3 +26,4 @@ go.work.sum
 
 test_files/
 output_files/
+*.iso

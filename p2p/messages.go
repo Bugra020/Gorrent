@@ -1,4 +1,4 @@
-package download_manager
+package p2p
 
 import (
 	"encoding/binary"
